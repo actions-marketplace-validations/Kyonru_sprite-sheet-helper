@@ -13,6 +13,14 @@ export const DEFAULT_PERSPECTIVE_CAMERA: CameraComponent = {
   far: 100,
 };
 
+/**
+ * Vertical world size of the orthographic export frustum before zoom.
+ *
+ * The capture camera and the fit solve must agree on this or solved zooms
+ * land at the wrong scale.
+ */
+export const ORTHOGRAPHIC_FRUSTUM_SIZE = 10;
+
 export const DEFAULT_ORTHOGRAPHIC_CAMERA: CameraComponent = {
   type: "orthographic" as CameraType,
   zoom: 1,

@@ -54,4 +54,12 @@ export type SpritePostprocessSnapshot = {
   selectedRow: number;
   selectedFrame: number;
   compareBeforeAfter: boolean;
+  /**
+   * Draw effects inside the captured frame instead of growing it.
+   *
+   * Optional so existing projects keep the grow-the-canvas behaviour. Safe to
+   * enable when the framing already reserved room for the effect, which
+   * auto-fit does.
+   */
+  preserveFrameSize?: boolean;
 };

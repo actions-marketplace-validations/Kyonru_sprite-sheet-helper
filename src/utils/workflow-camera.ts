@@ -2,6 +2,7 @@ import { computePosition, type WorkflowDirection } from "@/constants/workflows";
 import type { CameraType } from "@/types/camera";
 import type { WorkflowCaptureSettingsByAnimation } from "./workflows";
 import type { InPlaceAxisModeInput } from "./animation-clips";
+import type { FitOptionsInput } from "./fit-solve";
 import * as THREE from "three";
 
 export type WorkflowCameraTarget = [number, number, number];
@@ -26,6 +27,8 @@ export type WorkflowRunOptions = {
   includeHiddenAnimations?: boolean;
   captureNormalMaps?: boolean;
   captureSettingsByAnimation?: WorkflowCaptureSettingsByAnimation;
+  /** Auto-framing. Defaults to manual, so existing runs keep their framing. */
+  fit?: FitOptionsInput;
 };
 
 export type ResolvedWorkflowCamera = {

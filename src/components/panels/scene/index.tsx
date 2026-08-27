@@ -2,7 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { ResizablePanel } from "@/components/ui/resizable";
 import { GripHorizontalIcon, RotateCcwIcon } from "lucide-react";
 import { useEntitiesStore } from "@/store/next/entities";
-import { useCamerasStore } from "@/store/next/cameras";
+import {
+  ORTHOGRAPHIC_FRUSTUM_SIZE,
+  useCamerasStore,
+} from "@/store/next/cameras";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -471,7 +474,7 @@ const CameraManager = () => {
     const orientation = new THREE.Quaternion().setFromEuler(rotation);
     const near = cameraValues.near;
     const far = cameraValues.far;
-    const orthoSize = 10;
+    const orthoSize = ORTHOGRAPHIC_FRUSTUM_SIZE;
     const fov = (cameraValues as PerspectiveCameraComponent).fov;
     const zoom = (cameraValues as OrthographicCameraComponent).zoom;
 

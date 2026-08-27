@@ -49,6 +49,16 @@ Use **Force animation in place** when root motion would move the character throu
 
 The setting is part of workflow animation settings, so it applies to workflow capture and preview without changing the original model file.
 
+## Auto-Fit Framing
+
+A workflow can solve its own framing instead of using the camera distance you dialled in. Before capturing, it measures every animation across its clip, projects the result through each direction's camera, and picks one distance and target that keep the widest pose inside a margin you choose.
+
+Run it from the CLI with `--fit auto --margin <px>`, or from the Export Workbench with **Fit camera to animation** for a single sequence.
+
+The panel shows a *Measuring animations for auto-fit* phase before capture starts, and lists any warnings — an animation with no measurable geometry, or a solve that did not settle.
+
+See the [CLI guide](cli.md) for the full option list.
+
 ## Output Structure
 
 Each animation clip is exported with direction labels appended to the clip name. For example, a model with `idle` and `walk` animations run through **Top-Down 8-Dir** produces:

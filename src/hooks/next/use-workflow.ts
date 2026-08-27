@@ -5,10 +5,18 @@ import {
   type CaptureStopPayload,
   type CaptureProgressPayload,
 } from "@/lib/events";
+import * as THREE from "three";
 import { useModelsStore } from "@/store/next/models";
+import { useRefsStore } from "@/store/next/refs";
 import { useImagesStore } from "@/store/next/images";
 import { useSettingsStore } from "@/store/next/settings";
-import { useCamerasStore } from "@/store/next/cameras";
+import {
+  DEFAULT_ORTHOGRAPHIC_CAMERA,
+  DEFAULT_PERSPECTIVE_CAMERA,
+  ORTHOGRAPHIC_FRUSTUM_SIZE,
+  useCamerasStore,
+} from "@/store/next/cameras";
+import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
 import { useTargetsStore } from "@/store/next/targets";
 import { useTransformsStore } from "@/store/next/transforms";
 import {
@@ -30,6 +38,23 @@ import {
   type ResolvedWorkflowCamera,
   type WorkflowRunOptions,
 } from "@/utils/workflow-camera";
+import {
+  computePosedBounds,
+  getClipSampleTimes,
+  normalizeFitOptions,
+  sampleBoundsAtTimes,
+  unionBoxes,
+  type FitOptions,
+} from "@/utils/fit-solve";
+import type { CameraType } from "@/types/camera";
+import {
+  EMPTY_WORKFLOW_FIT,
+  solveWorkflowFit,
+  type WorkflowFitLens,
+  type WorkflowFitResult,
+  type WorkflowFitStep,
+} from "@/utils/workflow-fit";
+import { getSpritePostprocessPadding } from "@/utils/sprite-postprocess";
 
 export type WorkflowStatus =
   | "idle"
@@ -38,8 +63,11 @@ export type WorkflowStatus =
   | "cancelled"
   | "error";
 
+export type WorkflowPhase = "idle" | "measuring" | "capturing";
+
 export interface WorkflowState {
   status: WorkflowStatus;
+  phase: WorkflowPhase;
   currentStep: number;
   totalSteps: number;
   currentFrame: number;
@@ -51,6 +79,7 @@ export interface WorkflowState {
   failureStep?: string;
   error?: string;
   currentCamera?: ResolvedWorkflowCamera;
+  fitWarnings?: string[];
 }
 
 const CAPTURE_TIMEOUT_BUFFER_MS = 5000;
@@ -58,6 +87,7 @@ const ANIMATION_READY_TIMEOUT_MS = 5000;
 
 const initialState: WorkflowState = {
   status: "idle",
+  phase: "idle",
   currentStep: 0,
   totalSteps: 0,
   currentFrame: 0,
@@ -238,6 +268,130 @@ function resetStepAnimation(
   if (clip) mixer?.clipAction(clip.clip)?.play();
 }
 
+/**
+ * A looping action wraps t=duration back to t=0, so the final sample is nudged
+ * inside the range to keep the end pose.
+ */
+const CLIP_END_EPSILON = 1e-3;
+
+/**
+ * The live scene object for a model.
+ *
+ * Registered by the model component; `getModelFromCache` in the models store
+ * looks like the obvious source but its cache is never written to.
+ */
+function getModelObject(uuid: string): THREE.Object3D | null {
+  return useRefsStore.getState().refs[uuid]?.current ?? null;
+}
+
+function getAnimationKey(step: WorkflowStep): string {
+  return `${step.modelUuid ?? "none"}:${step.animationName}`;
+}
+
+function resolveFitLens(
+  cameraType: CameraType,
+  aspect: number,
+  cameraUUID?: string,
+): { lens: WorkflowFitLens; baseZoom: number } {
+  const camera = cameraUUID
+    ? useCamerasStore.getState().cameras[cameraUUID]
+    : undefined;
+
+  if (cameraType === "orthographic") {
+    // Must mirror the export camera built in the scene, or solved zooms land
+    // at the wrong scale.
+    const size = ORTHOGRAPHIC_FRUSTUM_SIZE;
+    return {
+      lens: {
+        cameraType: "orthographic",
+        frustum: {
+          left: (size * aspect) / -2,
+          right: (size * aspect) / 2,
+          top: size / 2,
+          bottom: size / -2,
+        },
+      },
+      baseZoom: camera?.zoom ?? DEFAULT_ORTHOGRAPHIC_CAMERA.zoom ?? 1,
+    };
+  }
+
+  return {
+    lens: {
+      cameraType: "perspective",
+      fov: camera?.fov ?? DEFAULT_PERSPECTIVE_CAMERA.fov ?? 75,
+    },
+    baseZoom: 1,
+  };
+}
+
+/**
+ * Measures world bounds once per animation.
+ *
+ * Bounds do not depend on the camera, so the directions of a preset all reuse
+ * the same measurement — the model is posed once per clip, not once per row.
+ * Driving the live mixer (rather than a private one) means trims, renames and
+ * forced-in-place clips are all already applied.
+ */
+async function measureWorkflowBounds(
+  steps: WorkflowStep[],
+  options: WorkflowRunOptions | undefined,
+  fitOptions: FitOptions,
+  onProgress: (measured: number, total: number) => void,
+  isAborted: () => boolean,
+): Promise<Record<string, THREE.Box3>> {
+  const representatives = new Map<string, WorkflowStep>();
+  for (const step of steps) {
+    const key = getAnimationKey(step);
+    if (!representatives.has(key)) representatives.set(key, step);
+  }
+
+  const entries = [...representatives.entries()];
+  const bounds: Record<string, THREE.Box3> = {};
+
+  for (let index = 0; index < entries.length; index++) {
+    if (isAborted()) break;
+
+    const [key, step] = entries[index];
+    onProgress(index + 1, entries.length);
+
+    if (!step.modelUuid) continue;
+    const root = getModelObject(step.modelUuid);
+    if (!root) continue;
+
+    await setStepAnimation(step, options);
+
+    const modelState = useModelsStore.getState();
+    const mixer = modelState.mixerRef[step.modelUuid];
+    const clip = (modelState.clips[step.modelUuid] ?? []).find(
+      (entry) => entry.clip.name === step.animationName,
+    )?.clip;
+
+    if (!mixer || !clip) {
+      bounds[key] = computePosedBounds(root, fitOptions);
+      continue;
+    }
+
+    const [start, end] = modelState.durations[step.modelUuid]?.[
+      step.animationName
+    ] ?? [0, clip.duration];
+    const span = Math.max(0, end - start);
+    const lastUsable = Math.max(start, end - CLIP_END_EPSILON);
+    const times = getClipSampleTimes(span, fitOptions.samples).map((offset) =>
+      Math.min(start + offset, lastUsable),
+    );
+
+    const sampled = sampleBoundsAtTimes(
+      root,
+      (time) => mixer.setTime(time),
+      times,
+      fitOptions,
+    );
+    bounds[key] = unionBoxes(sampled.map((entry) => entry.box));
+  }
+
+  return bounds;
+}
+
 export const useWorkflow = () => {
   const [workflowState, setWorkflowState] =
     useState<WorkflowState>(initialState);
@@ -313,8 +467,12 @@ export const useWorkflow = () => {
       ? (useTargetsStore.getState().targets[cameraUUID] ?? [0, 0, 0])
       : [0, 0, 0];
 
+    const fitOptions = normalizeFitOptions(options?.fit);
+    const shouldFit = fitOptions.mode === "auto" && steps.length > 0;
+
     setWorkflowState({
       status: "running",
+      phase: shouldFit ? "measuring" : "capturing",
       currentStep: 0,
       totalSteps: steps.length,
       currentFrame: 0,
@@ -325,7 +483,77 @@ export const useWorkflow = () => {
       startedAt: Date.now(),
     });
 
+    let fitResult: WorkflowFitResult = EMPTY_WORKFLOW_FIT;
+
     try {
+      if (shouldFit) {
+        const boundsByAnimation = await measureWorkflowBounds(
+          steps,
+          options,
+          fitOptions,
+          (measured, total) => {
+            setWorkflowState((prev) => ({
+              ...prev,
+              currentStep: measured,
+              totalSteps: total,
+            }));
+          },
+          () => abortRef.current,
+        );
+
+        const { exportWidth, exportHeight } = useSettingsStore.getState();
+        const aspect = Math.max(1e-6, exportWidth / exportHeight);
+        const { lens, baseZoom } = resolveFitLens(
+          workflowCameraType,
+          aspect,
+          cameraUUID,
+        );
+
+        fitResult = solveWorkflowFit({
+          steps: steps.map<WorkflowFitStep>((step) => {
+            const camera = resolveWorkflowCamera({
+              direction: getDirectionForStep(workflow, step),
+              defaultDistance: cameraDistance,
+              defaultCameraAngle: cameraAngle,
+              defaultCameraType: workflowCameraType,
+              defaultTarget: target,
+              options,
+            });
+
+            return {
+              rowLabel: step.rowLabel,
+              animationKey: getAnimationKey(step),
+              animationName: step.animationName,
+              directionLabel: step.directionLabel,
+              phi: camera.phi,
+              theta: camera.theta,
+            };
+          }),
+          boundsByAnimation,
+          lens,
+          viewport: { width: exportWidth, height: exportHeight },
+          baseDistance: cameraDistance,
+          baseZoom,
+          baseTarget: target,
+          // An explicit target is a deliberate pivot; never override it.
+          recenter: options?.target === undefined,
+          reservedMargin: getSpritePostprocessPadding(
+            useSpritePostprocessStore.getState().getSnapshot(),
+          ),
+          fit: fitOptions,
+        });
+
+        setWorkflowState((prev) => ({
+          ...prev,
+          phase: "capturing",
+          currentStep: 0,
+          totalSteps: steps.length,
+          ...(fitResult.warnings.length
+            ? { fitWarnings: fitResult.warnings }
+            : {}),
+        }));
+      }
+
       for (let index = 0; index < steps.length; index++) {
         if (abortRef.current) break;
 
@@ -350,13 +578,24 @@ export const useWorkflow = () => {
         await setStepAnimation(step, options);
         resetStepAnimation(step, options);
 
+        // The solved framing is fed in as the run-level camera value, so
+        // per-direction overrides still win over it.
+        const fitSolution = fitResult.solutions[step.rowLabel];
+        const stepOptions = fitSolution
+          ? {
+              ...options,
+              cameraDistance: fitSolution.zoom ?? fitSolution.distance,
+              target: fitSolution.target,
+            }
+          : options;
+
         const camera = resolveWorkflowCamera({
           direction: dir,
           defaultDistance: cameraDistance,
           defaultCameraAngle: cameraAngle,
           defaultCameraType: workflowCameraType,
           defaultTarget: target,
-          options,
+          options: stepOptions,
         });
 
         setWorkflowState((prev) => ({
@@ -425,7 +664,7 @@ export const useWorkflow = () => {
       }
 
       const status = abortRef.current ? "cancelled" : "done";
-      setWorkflowState((prev) => ({ ...prev, status }));
+      setWorkflowState((prev) => ({ ...prev, status, phase: "idle" }));
 
       PubSub.emit(EventType.STOP_WORKFLOW, {
         workflow,
@@ -436,6 +675,7 @@ export const useWorkflow = () => {
       setWorkflowState((prev) => ({
         ...prev,
         status: "error",
+        phase: "idle",
         failureStep: prev.currentLabel,
         error: (err as Error).message,
       }));

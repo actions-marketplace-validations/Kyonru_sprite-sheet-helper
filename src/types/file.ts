@@ -26,6 +26,14 @@ export interface AtlasOptions {
   scale: number;
   maxAtlasSize: number;
   allowMultiPage: boolean;
+  /**
+   * Transparent pixels added per side *inside* each frame rect.
+   *
+   * Distinct from `padding`, which is a gutter between slots and sits outside
+   * the rect an engine reads, and from `extrude`, which fills that gutter with
+   * edge pixels. This margin travels with the sprite.
+   */
+  spriteMargin: number;
 }
 
 export interface ExportRow {

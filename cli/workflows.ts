@@ -28,6 +28,7 @@ export async function captureWorkflow(
     captureNormalMaps,
     forceAnimationsInPlace,
     skipStepLabels,
+    fit,
     workflowTimeout,
     silent,
   }: WorkflowOptions,
@@ -110,6 +111,7 @@ export async function captureWorkflow(
       : { forceAnimationsInPlace }),
     ...(skipStepLabels === undefined ? {} : { skipStepLabels }),
     ...(captureNormalMaps === undefined ? {} : { captureNormalMaps }),
+    ...(fit === undefined ? {} : { fit }),
   };
 
   await page.evaluate(

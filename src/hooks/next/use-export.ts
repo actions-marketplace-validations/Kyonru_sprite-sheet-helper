@@ -83,6 +83,9 @@ export const useExport = () => {
   const atlasLayout = useSettingsStore((state) => state.atlasLayout);
   const atlasPadding = useSettingsStore((state) => state.atlasPadding);
   const atlasBleed = useSettingsStore((state) => state.atlasBleed);
+  const atlasSpriteMargin = useSettingsStore(
+    (state) => state.atlasSpriteMargin,
+  );
   const atlasScale = useSettingsStore((state) => state.atlasScale);
   const maxAtlasSize = useSettingsStore((state) => state.maxAtlasSize);
   const allowMultiPage = useSettingsStore((state) => state.allowMultiPage);
@@ -179,6 +182,7 @@ export const useExport = () => {
         layout: atlasLayout,
         padding: atlasPadding,
         extrude: atlasBleed,
+        spriteMargin: atlasSpriteMargin,
         scale: atlasScale,
         maxAtlasSize,
         allowMultiPage,
@@ -266,6 +270,7 @@ export const useExport = () => {
     [
       allowMultiPage,
       atlasBleed,
+      atlasSpriteMargin,
       atlasLayout,
       atlasPadding,
       atlasScale,

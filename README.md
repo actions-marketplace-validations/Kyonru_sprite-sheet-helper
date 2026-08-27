@@ -83,6 +83,14 @@ Record animation clips directly from a webcam or a photo — no 3D animation sof
 
 Save and load `.sshProj` files to preserve the full scene state — objects, lights, camera, animations, materials, spritesheet postprocess settings, and undo history included.
 
+### Auto-fit framing
+
+Manual camera framing is a guess: tuned so `idle` fills the frame, it clips `run`; tuned to be safe for everything, it wastes most of the sprite.
+
+With `--fit auto`, the run measures every animation before capturing — posing each clip, taking world-space bounds at each sample, projecting them through every direction's camera — then solves a single distance and target that hold the widest case inside the margin you ask for. Every row captures at that framing, so one scale and one pivot cover the whole sheet, and `--margin 6` really means 6px on every sprite.
+
+Available in the app too: **Fit camera to animation** in the Export Workbench fits a single sequence the same way. Defaults to `manual`, so existing projects are unchanged.
+
 ### Spritesheet postprocess
 
 The Export Workbench can apply 2D effects after capture and before atlas packing:
@@ -141,6 +149,12 @@ sprite-sheet-helper <input> [options]
 | `--atlasLayout`             | `rows`        | Atlas layout: `rows` or `packed`                                  |
 | `--atlasPadding`            | `0`           | Empty pixels around each frame slot                               |
 | `--atlasBleed`              | `0`           | Edge-pixel extrusion into padding                                 |
+| `--atlasSpriteMargin`       | `0`           | Transparent border inside each frame rect                         |
+| `--fit`                     | `manual`      | `auto` solves one framing for the whole run                       |
+| `--margin`                  | `0`           | Guaranteed border around the sprite (used with `--fit auto`)      |
+| `--marginUnit`              | `px`          | `px` or `percent`, per side                                       |
+| `--fitScope`                | `all`         | What shares a framing: `all`, `animation`, `direction`            |
+| `--fitSamples`              | `12`          | Poses sampled per clip while measuring                            |
 | `--atlasScale`              | `1`           | Scale atlas frame dimensions                                      |
 | `--maxAtlasSize`            | `2048`        | Maximum atlas page width and height                               |
 | `--multiPage`               | `false`       | Allow generic spritesheet page splitting                          |
@@ -184,6 +198,9 @@ sprite-sheet-helper character.glb --format spritesheet --atlasLayout packed --mu
 
 # Workflow camera override with JSON output
 sprite-sheet-helper character.glb --workflow topdown-4dir --cameraAngle 45 --target 0,0.8,0 --json
+
+# Solve one framing for every animation and direction, with a 6px margin
+sprite-sheet-helper character.glb --workflow platformer --fit auto --margin 6
 ```
 
 ### Batch config

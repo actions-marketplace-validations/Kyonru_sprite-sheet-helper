@@ -370,7 +370,11 @@ export async function applySpritePostprocessRows(
     : [];
   if (effects.length === 0) return rows;
 
-  const padding = getRequiredPadding(effects);
+  // Growing the canvas means a 64x64 export leaves as 70x70 once an outline is
+  // on. When the framing already reserved that room, effects are drawn inside
+  // the frame instead and the requested size is what ships. Writes clip at the
+  // edge on their own -- see blendPixel.
+  const padding = getSpritePostprocessFrameGrowth(settings);
 
   return Promise.all(
     rows.map(async (row) => {
@@ -398,8 +402,23 @@ export async function applySpritePostprocessRows(
   );
 }
 
+/** Pixels per side the enabled effects need in order to draw in full. */
 export function getSpritePostprocessPadding(
   settings?: SpritePostprocessSnapshot,
 ): number {
   return settings?.enabled ? getRequiredPadding(settings.effects ?? []) : 0;
+}
+
+/**
+ * Pixels per side the export will actually add to each frame.
+ *
+ * Zero when the frame size is preserved: the effect then draws inside the
+ * captured frame, which only stays clean because the framing reserved that
+ * room for it.
+ */
+export function getSpritePostprocessFrameGrowth(
+  settings?: SpritePostprocessSnapshot,
+): number {
+  if (settings?.preserveFrameSize) return 0;
+  return getSpritePostprocessPadding(settings);
 }

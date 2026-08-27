@@ -246,6 +246,7 @@ async function runJobInner(
         captureNormalMaps: job.captureNormalMaps,
         forceAnimationsInPlace: job.forceAnimationsInPlace,
         skipStepLabels: job.skipStepLabels,
+        fit: job.fit,
         workflowTimeout: job.workflowTimeout,
         silent: command.quiet || command.json,
       });

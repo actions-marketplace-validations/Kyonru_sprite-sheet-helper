@@ -14,6 +14,74 @@ describe("CLI option parsing", () => {
     await Promise.all(tempDirs.splice(0).map((dir) => removeTempDir(dir)));
   });
 
+  it("defaults to manual framing so existing runs are unchanged", async () => {
+    const command = await parseCliCommand(["character.glb"], {
+      validateInput: false,
+    });
+
+    expect(command).toMatchObject({
+      kind: "run",
+      jobs: [
+        {
+          fit: {
+            mode: "manual",
+            margin: 0,
+            marginUnit: "px",
+            scope: "all",
+            samples: 12,
+          },
+        },
+      ],
+    });
+  });
+
+  it("parses the framing options", async () => {
+    const command = await parseCliCommand([
+      "character.glb",
+      "--fit",
+      "auto",
+      "--margin",
+      "4",
+      "--marginUnit",
+      "px",
+      "--fitScope",
+      "animation",
+      "--fitSamples",
+      "24",
+      "--atlasSpriteMargin",
+      "3",
+    ], { validateInput: false });
+
+    expect(command).toMatchObject({
+      kind: "run",
+      jobs: [
+        {
+          fit: {
+            mode: "auto",
+            margin: 4,
+            marginUnit: "px",
+            scope: "animation",
+            samples: 24,
+          },
+          atlasOptions: { spriteMargin: 3 },
+        },
+      ],
+    });
+  });
+
+  it("rejects unusable framing values", async () => {
+    const reject = (args: string[]) =>
+      expect(
+        parseCliCommand(args, { validateInput: false }),
+      ).rejects.toBeInstanceOf(CliUsageError);
+
+    await reject(["character.glb", "--fit", "sometimes"]);
+    await reject(["character.glb", "--fitScope", "sideways"]);
+    await reject(["character.glb", "--marginUnit", "em"]);
+    // parseArgs reads a bare "-2" as another flag, so negatives need "=".
+    await reject(["character.glb", "--margin=-2"]);
+  });
+
   it("returns help and list commands without requiring an input", async () => {
     await expect(parseCliCommand(["--help"])).resolves.toMatchObject({
       kind: "help",

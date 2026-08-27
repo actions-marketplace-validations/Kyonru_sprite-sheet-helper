@@ -1631,7 +1631,11 @@ export const WorkflowsMenu = () => {
               {isRunning && (
                 <div className="flex flex-col gap-1 rounded-md border bg-muted/20 p-3">
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Capturing: {workflowState.currentLabel}</span>
+                    <span>
+                      {workflowState.phase === "measuring"
+                        ? "Measuring animations for auto-fit"
+                        : `Capturing: ${workflowState.currentLabel}`}
+                    </span>
                     <span>
                       {workflowState.currentStep} / {workflowState.totalSteps}
                     </span>
@@ -1697,6 +1701,14 @@ export const WorkflowsMenu = () => {
                   Workflow cancelled.
                 </p>
               )}
+
+              {workflowState.fitWarnings?.length ? (
+                <ul className="flex flex-col gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">
+                  {workflowState.fitWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
 
               {workflowState.status === "error" && (
                 <p className="text-sm text-destructive">

@@ -22,6 +22,7 @@ import {
   Settings2,
   SquareStack,
   Trash2Icon,
+  Crosshair,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -41,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EventType, PubSub } from "@/lib/events";
 import { useImagesStore } from "@/store/next/images";
@@ -61,6 +63,7 @@ import {
 import { SequencePreview } from "./export-workbench/sequence-preview";
 import { SpritePostprocessWorkbench } from "./export-workbench/sprite-postprocess";
 import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
+import { useFitCamera } from "@/hooks/next/use-fit-camera";
 
 const FORMAT_NOTES: Partial<
   Record<ExportFormat, { category: string; note: string }>
@@ -493,6 +496,8 @@ export function ExportWorkbench() {
   const exportWidth = useSettingsStore((state) => state.exportWidth);
   const exportHeight = useSettingsStore((state) => state.exportHeight);
   const setExportWidth = useSettingsStore((state) => state.setExportWidth);
+  const fitMargin = useSettingsStore((state) => state.fitMargin);
+  const setFitMargin = useSettingsStore((state) => state.setFitMargin);
   const setExportHeight = useSettingsStore((state) => state.setExportHeight);
   const exportNormalMap = useSettingsStore((state) => state.exportNormalMap);
   const setExportNormalMap = useSettingsStore(
@@ -501,10 +506,15 @@ export function ExportWorkbench() {
   const atlasLayout = useSettingsStore((state) => state.atlasLayout);
   const atlasPadding = useSettingsStore((state) => state.atlasPadding);
   const atlasBleed = useSettingsStore((state) => state.atlasBleed);
+  const atlasSpriteMargin = useSettingsStore(
+    (state) => state.atlasSpriteMargin,
+  );
   const atlasScale = useSettingsStore((state) => state.atlasScale);
   const maxAtlasSize = useSettingsStore((state) => state.maxAtlasSize);
   const allowMultiPage = useSettingsStore((state) => state.allowMultiPage);
   const setAtlasOptions = useSettingsStore((state) => state.setAtlasOptions);
+
+  const { fitCameraToAnimation } = useFitCamera();
 
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -519,6 +529,7 @@ export function ExportWorkbench() {
       layout: atlasLayout,
       padding: atlasPadding,
       extrude: atlasBleed,
+      spriteMargin: atlasSpriteMargin,
       scale: atlasScale,
       maxAtlasSize,
       allowMultiPage,
@@ -526,6 +537,7 @@ export function ExportWorkbench() {
     [
       allowMultiPage,
       atlasBleed,
+      atlasSpriteMargin,
       atlasLayout,
       atlasPadding,
       atlasScale,
@@ -677,7 +689,33 @@ export function ExportWorkbench() {
                 min={1}
                 onChange={setExportHeight}
               />
+              <NumberField
+                label="Margin px"
+                value={fitMargin}
+                min={0}
+                onChange={setFitMargin}
+              />
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const result = fitCameraToAnimation({
+                  margin: fitMargin,
+                  marginUnit: "px",
+                });
+                if (result.fitted) {
+                  toast.success(
+                    `Camera fitted at distance ${result.distance?.toFixed(2)}`,
+                  );
+                } else {
+                  toast.error(result.warnings[0] ?? "Nothing to fit.");
+                }
+              }}
+            >
+              <Crosshair size={14} />
+              Fit camera to animation
+            </Button>
             <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
               Capture normal maps
               <Switch
@@ -1021,6 +1059,14 @@ export function ExportWorkbench() {
                         inputTestId="atlas-extrude-input"
                         onChange={(value) =>
                           setAtlasOptions({ extrude: value })
+                        }
+                      />
+                      <NumberField
+                        label="Sprite margin"
+                        value={atlasSpriteMargin}
+                        inputTestId="atlas-sprite-margin-input"
+                        onChange={(value) =>
+                          setAtlasOptions({ spriteMargin: value })
                         }
                       />
                       <NumberField

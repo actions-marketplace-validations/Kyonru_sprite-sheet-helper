@@ -13,13 +13,27 @@ export interface CaptureOptions {
   captureNormalMaps?: boolean;
   forceAnimationsInPlace?: boolean;
   skipStepLabels?: string[];
+  fit?: CliFitOptions;
   silent?: boolean;
 }
+
+export type CliFitMode = "auto" | "manual";
+export type CliFitScope = "all" | "animation" | "direction";
+export type CliFitMarginUnit = "px" | "percent";
+
+export type CliFitOptions = {
+  mode: CliFitMode;
+  margin: number;
+  marginUnit: CliFitMarginUnit;
+  scope: CliFitScope;
+  samples: number;
+};
 
 export interface CliAtlasOptions {
   layout?: "rows" | "packed";
   padding?: number;
   extrude?: number;
+  spriteMargin?: number;
   scale?: number;
   maxAtlasSize?: number;
   allowMultiPage?: boolean;

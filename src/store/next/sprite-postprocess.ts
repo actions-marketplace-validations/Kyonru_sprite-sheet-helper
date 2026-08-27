@@ -15,6 +15,7 @@ const DEFAULT_SNAPSHOT: SpritePostprocessSnapshot = {
   selectedRow: 0,
   selectedFrame: 0,
   compareBeforeAfter: false,
+  preserveFrameSize: false,
 };
 
 function createId(type: SpritePostprocessEffectType) {
@@ -85,6 +86,7 @@ function normalizeSnapshot(
       ? Math.max(0, Math.floor(snapshot?.selectedFrame ?? 0))
       : 0,
     compareBeforeAfter: Boolean(snapshot?.compareBeforeAfter),
+    preserveFrameSize: Boolean(snapshot?.preserveFrameSize),
   };
 }
 
@@ -93,6 +95,7 @@ export type SpritePostprocessState = SpritePostprocessSnapshot & {
   setSelectedRow: (selectedRow: number) => void;
   setSelectedFrame: (selectedFrame: number) => void;
   setCompareBeforeAfter: (compareBeforeAfter: boolean) => void;
+  setPreserveFrameSize: (preserveFrameSize: boolean) => void;
   addEffect: (type: SpritePostprocessEffectType) => void;
   updateEffect: (
     id: string,
@@ -115,6 +118,7 @@ export const useSpritePostprocessStore = create<SpritePostprocessState>()(
       set({ selectedFrame: Math.max(0, Math.floor(selectedFrame)) }),
     setCompareBeforeAfter: (compareBeforeAfter) =>
       set({ compareBeforeAfter }),
+    setPreserveFrameSize: (preserveFrameSize) => set({ preserveFrameSize }),
     addEffect: (type) =>
       set((state) => ({
         enabled: true,
@@ -152,6 +156,7 @@ export const useSpritePostprocessStore = create<SpritePostprocessState>()(
         selectedRow: state.selectedRow,
         selectedFrame: state.selectedFrame,
         compareBeforeAfter: state.compareBeforeAfter,
+        preserveFrameSize: state.preserveFrameSize ?? false,
       };
     },
   }),

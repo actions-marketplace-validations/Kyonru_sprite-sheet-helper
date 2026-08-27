@@ -12,6 +12,7 @@ export const DEFAULT_ATLAS_OPTIONS: AtlasOptions = {
   scale: 1,
   maxAtlasSize: 2048,
   allowMultiPage: false,
+  spriteMargin: 0,
 };
 
 export const ATLAS_EXPORT_FORMATS = new Set<ExportFormat>([
@@ -111,6 +112,10 @@ export function normalizeAtlasOptions(
       positiveInteger(options.maxAtlasSize, DEFAULT_ATLAS_OPTIONS.maxAtlasSize),
     ),
     allowMultiPage: Boolean(options.allowMultiPage),
+    spriteMargin: positiveInteger(
+      options.spriteMargin,
+      DEFAULT_ATLAS_OPTIONS.spriteMargin,
+    ),
   };
 }
 
@@ -124,8 +129,10 @@ export function getAtlasFrameSlotSize(
 ): AtlasFrameSlotSize {
   const normalized = normalizeAtlasOptions(options);
   const gutter = normalized.padding + normalized.extrude;
-  const w = scaledSize(row.frameWidth, normalized.scale);
-  const h = scaledSize(row.frameHeight, normalized.scale);
+  const margin = normalized.spriteMargin;
+  // The margin is part of the frame rect, so it scales the slot too.
+  const w = scaledSize(row.frameWidth, normalized.scale) + margin * 2;
+  const h = scaledSize(row.frameHeight, normalized.scale) + margin * 2;
 
   return {
     w,
@@ -578,7 +585,7 @@ export function createSpritesheetJSONFromAtlasPlan(
     frameCount: rows.reduce((acc, row) => acc + row.images.length, 0),
     animationCount: rows.length,
     spacing: plan.options.padding * 2 + plan.options.extrude * 2,
-    margin: 0,
+    margin: plan.options.spriteMargin,
   };
 
   if (normalImageName) {
@@ -611,11 +618,8 @@ export function createSpritesheetJSONFromAtlasPlan(
         name: row.label,
         frames: row.images.length,
         fps: row.fps ?? 12,
-        frameWidth: Math.max(1, Math.round(row.frameWidth * plan.options.scale)),
-        frameHeight: Math.max(
-          1,
-          Math.round(row.frameHeight * plan.options.scale),
-        ),
+        frameWidth: getAtlasFrameSlotSize(row, plan.options).w,
+        frameHeight: getAtlasFrameSlotSize(row, plan.options).h,
         ...(workflow ? { workflow } : {}),
         quads: row.images.map((_, frameIndex) => {
           const placement = placements.get(placementKey(rowIndex, frameIndex));

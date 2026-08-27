@@ -9,6 +9,10 @@ import {
 } from "./data.js";
 import type {
   CliAtlasOptions,
+  CliFitMarginUnit,
+  CliFitMode,
+  CliFitOptions,
+  CliFitScope,
   CliWorkflowCameraTarget,
   CliWorkflowDirectionOverride,
   CliWorkflowDirectionOverrides,
@@ -27,6 +31,12 @@ const DEFAULTS = {
   atlasLayout: "rows",
   atlasPadding: 0,
   atlasBleed: 0,
+  atlasSpriteMargin: 0,
+  fit: "manual",
+  margin: 0,
+  marginUnit: "px",
+  fitScope: "all",
+  fitSamples: 12,
   atlasScale: 1,
   maxAtlasSize: 2048,
   multiPage: false,
@@ -65,6 +75,12 @@ type RawJobOptions = {
   atlasLayout?: unknown;
   atlasPadding?: unknown;
   atlasBleed?: unknown;
+  atlasSpriteMargin?: unknown;
+  fit?: unknown;
+  margin?: unknown;
+  marginUnit?: unknown;
+  fitScope?: unknown;
+  fitSamples?: unknown;
   atlasScale?: unknown;
   maxAtlasSize?: unknown;
   multiPage?: unknown;
@@ -103,6 +119,7 @@ export type CliJob = {
   skipStepLabels?: string[];
   forceAnimationsInPlace?: boolean;
   captureNormalMaps?: boolean;
+  fit: CliFitOptions;
   normalMap: boolean;
   atlasOptions: CliAtlasOptions;
   timeout?: number;
@@ -193,6 +210,12 @@ export async function parseCliCommand(
       atlasLayout: { type: "string" },
       atlasPadding: { type: "string" },
       atlasBleed: { type: "string" },
+      atlasSpriteMargin: { type: "string" },
+      fit: { type: "string" },
+      margin: { type: "string" },
+      marginUnit: { type: "string" },
+      fitScope: { type: "string" },
+      fitSamples: { type: "string" },
       atlasScale: { type: "string" },
       maxAtlasSize: { type: "string" },
       multiPage: { type: "string" },
@@ -345,6 +368,14 @@ export function createHelpText(): string {
     "  --atlasLayout <rows|packed>  Default: rows",
     "  --atlasPadding <px>         Default: 0",
     "  --atlasBleed <px>           Edge extrusion. Default: 0",
+    "  --atlasSpriteMargin <px>    Transparent border inside each frame rect. Default: 0",
+    "",
+    "Framing options:",
+    "  --fit <auto|manual>         Solve one framing for the whole run. Default: manual",
+    "  --margin <n>                Margin reserved around the sprite. Default: 0",
+    "  --marginUnit <px|percent>   Unit for --margin. Default: px",
+    "  --fitScope <all|animation|direction>  What shares a framing. Default: all",
+    "  --fitSamples <n>            Poses sampled per clip while measuring. Default: 12",
     "  --atlasScale <n>            Default: 1",
     "  --maxAtlasSize <px>         Default: 2048",
     "  --multiPage <bool>          Allow generic spritesheet page splitting.",
@@ -394,6 +425,12 @@ function rawValuesToJobOptions(values: Record<string, unknown>): RawJobOptions {
     "atlasLayout",
     "atlasPadding",
     "atlasBleed",
+    "atlasSpriteMargin",
+    "fit",
+    "margin",
+    "marginUnit",
+    "fitScope",
+    "fitSamples",
     "atlasScale",
     "maxAtlasSize",
     "multiPage",
@@ -515,6 +552,7 @@ function normalizeJob(raw: RawJobOptions, cwd: string, index: number): CliJob {
       raw.target === undefined
         ? undefined
         : parseTarget(raw.target, "target"),
+    fit: parseFitOptions(raw),
     directionOverrides: parseDirectionOverrides(raw),
     skipStepLabels: parseSkipStepLabels(raw),
     forceAnimationsInPlace: parseForceAnimationsInPlace(raw),
@@ -554,6 +592,12 @@ function normalizeAtlasOptions(raw: RawJobOptions): CliAtlasOptions {
       raw.atlasBleed ?? nested.extrude ?? DEFAULTS.atlasBleed,
       "atlasBleed",
     ),
+    spriteMargin: nonNegativeInteger(
+      raw.atlasSpriteMargin ??
+        nested.spriteMargin ??
+        DEFAULTS.atlasSpriteMargin,
+      "atlasSpriteMargin",
+    ),
     scale: positiveNumber(
       raw.atlasScale ?? nested.scale ?? DEFAULTS.atlasScale,
       "atlasScale",
@@ -578,6 +622,48 @@ function parseFormat(value: unknown): ExportFormat {
     );
   }
   return aliased as ExportFormat;
+}
+
+const FIT_MODES: CliFitMode[] = ["auto", "manual"];
+const FIT_SCOPES: CliFitScope[] = ["all", "animation", "direction"];
+const FIT_MARGIN_UNITS: CliFitMarginUnit[] = ["px", "percent"];
+
+function parseFitOptions(raw: RawJobOptions): CliFitOptions {
+  const mode = (getOptionalString(raw.fit, "fit") ??
+    DEFAULTS.fit) as CliFitMode;
+  if (!FIT_MODES.includes(mode)) {
+    throw new CliUsageError('fit must be "auto" or "manual".');
+  }
+
+  const scope = (getOptionalString(raw.fitScope, "fitScope") ??
+    DEFAULTS.fitScope) as CliFitScope;
+  if (!FIT_SCOPES.includes(scope)) {
+    throw new CliUsageError(
+      'fitScope must be "all", "animation" or "direction".',
+    );
+  }
+
+  const marginUnit = (getOptionalString(raw.marginUnit, "marginUnit") ??
+    DEFAULTS.marginUnit) as CliFitMarginUnit;
+  if (!FIT_MARGIN_UNITS.includes(marginUnit)) {
+    throw new CliUsageError('marginUnit must be "px" or "percent".');
+  }
+
+  const margin =
+    raw.margin === undefined
+      ? DEFAULTS.margin
+      : finiteNumber(raw.margin, "margin");
+  if (margin < 0) {
+    throw new CliUsageError("margin must be zero or greater.");
+  }
+
+  return {
+    mode,
+    margin,
+    marginUnit,
+    scope,
+    samples: positiveInteger(raw.fitSamples ?? DEFAULTS.fitSamples, "fitSamples"),
+  };
 }
 
 function parseDirectionOverrides(
