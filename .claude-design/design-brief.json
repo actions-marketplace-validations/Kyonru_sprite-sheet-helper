@@ -1,0 +1,59 @@
+{
+  "scope": "page",
+  "isRedesign": true,
+  "targetPath": "src/components/export-workbench.tsx, src/components/panels/main/**",
+  "targetName": "Workbench chrome (left rail + export rail)",
+  "painPoints": [
+    "Chrome reads as a generic shadcn dashboard rather than a sprite tool",
+    "10px radii and soft shadows read as web-app, not instrument",
+    "No visual identity that comes from the domain (pixel art / atlases)"
+  ],
+  "inspiration": {
+    "visual": ["Aseprite", "Blender", "Houdini", "Figma", "Linear"],
+    "functional": [
+      "Progressive disclosure (collapsible rail sections)",
+      "Drag-to-scrub number fields",
+      "Keyboard shortcuts",
+      "Hover-revealed controls"
+    ]
+  },
+  "brand": {
+    "adjectives": ["utilitarian", "precise", "domain-native", "quiet"],
+    "density": "compact",
+    "darkMode": true
+  },
+  "persona": {
+    "primary": "Game developer / pixel artist",
+    "context": "desktop-only",
+    "keyTasks": [
+      "Pose and frame a 3D model for capture",
+      "Record a sequence and judge the resulting sprite frames",
+      "Configure and run an atlas export for a target engine"
+    ]
+  },
+  "constraints": {
+    "mustKeep": [
+      "Existing copy/labels",
+      "Current fields/inputs",
+      "Three-column shell structure"
+    ],
+    "technical": [
+      "no new dependencies",
+      "use existing shadcn primitives",
+      "dark mode required",
+      "chrome must not contaminate perception of the sprite beside it"
+    ],
+    "paletteFreedom": "anything goes - saturated fields permitted for this exploration"
+  },
+  "variants": {
+    "A": "Pixel-native instrument",
+    "B": "Density-first DCC",
+    "C": "Darkroom",
+    "D": "Neo-brutalism (control)",
+    "E": "Bento box layout"
+  },
+  "framework": "vite-react",
+  "packageManager": "npm",
+  "stylingSystem": "tailwind-v4-css-first",
+  "labRoute": "?design_lab=true"
+}

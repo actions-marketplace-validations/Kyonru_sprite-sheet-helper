@@ -12,6 +12,15 @@ import { installReloadStatusDebug } from "./utils/reload-status-debug";
 
 installReloadStatusDebug();
 
+// --- design lab (temporary; removed when the exploration finishes) ---
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(window.location.search).get("design_lab") === "true"
+) {
+  const { default: DesignLabPage } = await import("./__design_lab/page");
+  createRoot(document.getElementById("root")!).render(<DesignLabPage />);
+} else {
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {/* Headless CLI runs must stay isolated and deterministic — never
@@ -46,3 +55,4 @@ createRoot(document.getElementById("root")!).render(
     )}
   </StrictMode>,
 );
+}
