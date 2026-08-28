@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CopyIcon,
   EraserIcon,
@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -250,7 +251,7 @@ export function MaterialsPanel({
       )}
     >
       <section className="flex min-h-[220px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<Layers3Icon className="size-4" />} title="Slots" />
+        <PanelHeader icon={Layers3Icon} title="Slots" className="border-b" />
         <div className="grid shrink-0 gap-2 border-b p-3">
           <Select value={modelUuid} onValueChange={setModelUuid}>
             <SelectTrigger className="w-full">
@@ -327,7 +328,7 @@ export function MaterialsPanel({
       </section>
 
       <section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<PaletteIcon className="size-4" />} title="Library" />
+        <PanelHeader icon={PaletteIcon} title="Library" className="border-b" />
         <div className="shrink-0 border-b p-3">
           <div className="rounded-md border bg-muted/20 p-3">
             <div className="flex items-start gap-3">
@@ -403,7 +404,7 @@ export function MaterialsPanel({
       </section>
 
       <section className="flex min-h-[320px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<SparklesIcon className="size-4" />} title="Edit" />
+        <PanelHeader icon={SparklesIcon} title="Edit" className="border-b" />
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {!selectedMaterial ? (
             <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -756,20 +757,5 @@ function ToggleRow({
         onCheckedChange={(value) => onCheckedChange(Boolean(value))}
       />
     </label>
-  );
-}
-
-function PanelHeader({
-  icon,
-  title,
-}: {
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-      <span className="shrink-0">{icon}</span>
-      <span className="min-w-0 truncate">{title}</span>
-    </div>
   );
 }

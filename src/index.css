@@ -45,34 +45,38 @@
 :root {
   --radius: 0.625rem;
 
-  /* Soft warm off-white background instead of pure white */
-  --background: oklch(0.98 0.003 285);
-  --foreground: oklch(0.18 0.008 285.823);
+  /* Graphite Instrument — cool near-neutral, hue 265, minimal chroma.
+     The chrome must not tint the artwork beside it, so surfaces carry only
+     enough colour to read as a system. Steel accent (248) unifies with the
+     selection blue the tree already used. Amber and emerald stay reserved for
+     warning and ok, which is what they already mean across the app. */
+  --background: oklch(0.962 0.003 265);
+  --foreground: oklch(0.3 0.01 265);
 
-  --card: oklch(0.975 0.004 285);
-  --card-foreground: oklch(0.18 0.008 285.823);
+  --card: oklch(0.995 0.002 265);
+  --card-foreground: oklch(0.3 0.01 265);
 
-  --popover: oklch(0.975 0.004 285);
-  --popover-foreground: oklch(0.18 0.008 285.823);
+  --popover: oklch(0.995 0.002 265);
+  --popover-foreground: oklch(0.3 0.01 265);
 
-  /* Slightly softened primary — deep slate, not pure black */
-  --primary: oklch(0.25 0.008 285.885);
-  --primary-foreground: oklch(0.97 0.003 285);
+  --primary: oklch(0.3 0.01 265);
+  --primary-foreground: oklch(0.985 0.002 265);
 
-  --secondary: oklch(0.94 0.004 286.375);
-  --secondary-foreground: oklch(0.25 0.008 285.885);
+  --secondary: oklch(0.928 0.004 265);
+  --secondary-foreground: oklch(0.3 0.01 265);
 
-  --muted: oklch(0.94 0.004 286.375);
-  --muted-foreground: oklch(0.48 0.018 285.938);
+  --muted: oklch(0.922 0.004 265);
+  --muted-foreground: oklch(0.5 0.012 265);
 
-  --accent: oklch(0.94 0.004 286.375);
-  --accent-foreground: oklch(0.25 0.008 285.885);
+  --accent: oklch(0.928 0.004 265);
+  --accent-foreground: oklch(0.3 0.01 265);
 
-  --destructive: oklch(0.55 0.22 27.325);
+  --destructive: oklch(0.52 0.196 27);
 
-  --border: oklch(0.88 0.006 286.32);
-  --input: oklch(0.88 0.006 286.32);
-  --ring: oklch(0.62 0.018 286.067);
+  --border: oklch(0.878 0.005 265);
+  /* Inputs sit below their surroundings: inset, so they read as receiving. */
+  --input: oklch(0.902 0.004 265);
+  --ring: oklch(0.52 0.115 248);
 
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -80,19 +84,19 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
 
-  --sidebar: oklch(0.96 0.004 285);
-  --sidebar-foreground: oklch(0.18 0.008 285.823);
-  --sidebar-primary: oklch(0.25 0.008 285.885);
-  --sidebar-primary-foreground: oklch(0.97 0.003 285);
-  --sidebar-accent: oklch(0.92 0.005 286.375);
-  --sidebar-accent-foreground: oklch(0.25 0.008 285.885);
-  --sidebar-border: oklch(0.88 0.006 286.32);
-  --sidebar-ring: oklch(0.62 0.018 286.067);
+  --sidebar: oklch(0.948 0.003 265);
+  --sidebar-foreground: oklch(0.3 0.01 265);
+  --sidebar-primary: oklch(0.52 0.115 248);
+  --sidebar-primary-foreground: oklch(0.985 0.002 265);
+  --sidebar-accent: oklch(0.928 0.004 265);
+  --sidebar-accent-foreground: oklch(0.3 0.01 265);
+  --sidebar-border: oklch(0.878 0.005 265);
+  --sidebar-ring: oklch(0.52 0.115 248);
 
   /* RCT tree variables — light mode */
   --rct-color-tree-bg: transparent;
   --rct-item-height: 28px;
-  --rct-color-search-highlight-bg: #c2d9f5;
+  --rct-color-search-highlight-bg: #cfdcea;
 
   --rct-color-tree-focus-outline: transparent;
   --rct-item-margin: 1px;
@@ -100,14 +104,14 @@
   --rct-radius: 4px;
   --rct-bar-offset: 6px;
   --rct-bar-width: 4px;
-  --rct-bar-color: #2f7cd4;
-  --rct-focus-outline: #3a3a4a;
+  --rct-bar-color: #286da7;
+  --rct-focus-outline: #60636a;
 
-  --rct-color-focustree-item-selected-bg: #eaecf0;
-  --rct-color-focustree-item-hover-bg: #eaecf0;
+  --rct-color-focustree-item-selected-bg: #e4e5e8;
+  --rct-color-focustree-item-hover-bg: #e4e5e8;
   --rct-color-focustree-item-hover-text: inherit;
-  --rct-color-focustree-item-active-bg: #d8dce5;
-  --rct-color-focustree-item-active-text: #3a3d4a;
+  --rct-color-focustree-item-active-bg: #dadbdf;
+  --rct-color-focustree-item-active-text: #2b2e33;
 
   --rct-arrow-size: 10px;
   --rct-arrow-container-size: 16px;
@@ -118,42 +122,42 @@
   --rct-search-width: 120px;
   --rct-search-height: 16px;
   --rct-search-padding: 8px;
-  --rct-search-border: #b0b4bd;
-  --rct-search-border-bottom: #2f7cd4;
-  --rct-search-bg: #f3f4f7;
-  --rct-search-text: #1a1c24;
+  --rct-search-border: #d5d7da;
+  --rct-search-border-bottom: #286da7;
+  --rct-search-bg: #dddfe1;
+  --rct-search-text: #2b2e33;
   --rct-search-text-offset: calc(var(--rct-search-padding) * 2 + 16px);
 }
 
 .dark {
-  /* Soft dark — warm-tinted deep slate, not pure black */
-  --background: oklch(0.16 0.007 285.823);
-  --foreground: oklch(0.93 0.005 285);
+  /* Graphite Instrument, dark. The base sits *above* the #1a1a1a viewport so
+     the 3D view stays the darkest thing on screen, as in every DCC tool. */
+  --background: oklch(0.243 0.005 265);
+  --foreground: oklch(0.9 0.004 265);
 
-  --card: oklch(0.21 0.008 285.885);
-  --card-foreground: oklch(0.93 0.005 285);
+  --card: oklch(0.278 0.0045 265);
+  --card-foreground: oklch(0.9 0.004 265);
 
-  --popover: oklch(0.21 0.008 285.885);
-  --popover-foreground: oklch(0.93 0.005 285);
+  --popover: oklch(0.303 0.0045 265);
+  --popover-foreground: oklch(0.9 0.004 265);
 
-  /* Lighter but still soft primary for dark mode */
-  --primary: oklch(0.88 0.006 286.32);
-  --primary-foreground: oklch(0.22 0.008 285.885);
+  --primary: oklch(0.86 0.005 265);
+  --primary-foreground: oklch(0.243 0.005 265);
 
-  --secondary: oklch(0.28 0.008 286.033);
-  --secondary-foreground: oklch(0.93 0.005 285);
+  --secondary: oklch(0.318 0.006 265);
+  --secondary-foreground: oklch(0.9 0.004 265);
 
-  --muted: oklch(0.28 0.008 286.033);
-  --muted-foreground: oklch(0.65 0.018 286.067);
+  --muted: oklch(0.318 0.006 265);
+  --muted-foreground: oklch(0.685 0.01 265);
 
-  --accent: oklch(0.28 0.008 286.033);
-  --accent-foreground: oklch(0.93 0.005 285);
+  --accent: oklch(0.33 0.006 265);
+  --accent-foreground: oklch(0.9 0.004 265);
 
-  --destructive: oklch(0.67 0.18 22.216);
+  --destructive: oklch(0.66 0.17 25);
 
-  --border: oklch(0.93 0.005 285 / 12%);
-  --input: oklch(0.93 0.005 285 / 16%);
-  --ring: oklch(0.5 0.018 285.938);
+  --border: oklch(0.36 0.007 265);
+  --input: oklch(0.208 0.005 265);
+  --ring: oklch(0.66 0.095 248);
 
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -161,38 +165,38 @@
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
 
-  --sidebar: oklch(0.21 0.008 285.885);
-  --sidebar-foreground: oklch(0.93 0.005 285);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.93 0.005 285);
-  --sidebar-accent: oklch(0.28 0.008 286.033);
-  --sidebar-accent-foreground: oklch(0.93 0.005 285);
-  --sidebar-border: oklch(0.93 0.005 285 / 12%);
-  --sidebar-ring: oklch(0.5 0.018 285.938);
+  --sidebar: oklch(0.262 0.005 265);
+  --sidebar-foreground: oklch(0.9 0.004 265);
+  --sidebar-primary: oklch(0.66 0.095 248);
+  --sidebar-primary-foreground: oklch(0.243 0.005 265);
+  --sidebar-accent: oklch(0.33 0.006 265);
+  --sidebar-accent-foreground: oklch(0.9 0.004 265);
+  --sidebar-border: oklch(0.36 0.007 265);
+  --sidebar-ring: oklch(0.66 0.095 248);
 
   /* RCT tree variables — dark mode */
-  --rct-color-search-highlight-bg: #2a4d7a;
-  --rct-bar-color: #6aadee;
-  --rct-focus-outline: #aab0c0;
+  --rct-color-search-highlight-bg: #2c4058;
+  --rct-bar-color: #6197ca;
+  --rct-focus-outline: #979aa0;
 
-  --rct-color-focustree-item-selected-bg: #2c2f3a;
-  --rct-color-focustree-item-hover-bg: #2c2f3a;
+  --rct-color-focustree-item-selected-bg: #313235;
+  --rct-color-focustree-item-hover-bg: #313235;
   --rct-color-focustree-item-hover-text: inherit;
-  --rct-color-focustree-item-active-bg: #35394a;
-  --rct-color-focustree-item-active-text: #c8ccd8;
+  --rct-color-focustree-item-active-bg: #393b3e;
+  --rct-color-focustree-item-active-text: #dddee1;
 
-  --rct-search-border: #4a4f60;
-  --rct-search-border-bottom: #6aadee;
-  --rct-search-bg: #1e2130;
-  --rct-search-text: #d0d4e0;
+  --rct-search-border: #3b3d41;
+  --rct-search-border-bottom: #6197ca;
+  --rct-search-bg: #17181a;
+  --rct-search-text: #dddee1;
 }
 
 .rct-tree-item-arrow svg {
-  stroke: #2a2d3a;
+  stroke: #60636a;
 }
 
 .dark .rct-tree-item-arrow svg {
-  stroke: #f3f4f7;
+  stroke: #979aa0;
 }
 
 @layer base {

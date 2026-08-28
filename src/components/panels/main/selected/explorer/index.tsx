@@ -1,4 +1,9 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import {
+  PanelTabsList,
+  PanelTabsTrigger,
+} from "@/components/panels/panel-tabs";
+import { PanelEmpty } from "@/components/panels/panel-empty";
 import { ObjectContext } from "./object";
 import { useEntitiesStore, useEntity } from "@/store/next/entities";
 import { capitalize } from "@/utils/strings";
@@ -72,12 +77,11 @@ export const ExplorerTabs = () => {
 
   if (!selected || !entity) {
     return (
-      <div className="grid h-full place-items-center px-4 text-center text-sm text-muted-foreground">
-        <div>
-          <MousePointerClick className="mx-auto mb-2 size-5" />
-          Select an object in the explorer to inspect it.
-        </div>
-      </div>
+      <PanelEmpty
+        icon={MousePointerClick}
+        title="Nothing selected"
+        description="Pick an object in the scene tree to inspect it."
+      />
     );
   }
 
@@ -87,36 +91,38 @@ export const ExplorerTabs = () => {
     : capitalize(entity.type, true);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <section className="shrink-0 rounded-md border bg-background p-2">
-        <div className="flex items-center gap-2">
-          <span className="rounded-md border bg-muted/30 p-1.5">
-            {ItemTypeIconMap[iconType] ?? <BoxIcon className="size-4" />}
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{entity.name}</div>
-            <p className="truncate text-xs text-muted-foreground">
-              {typeLabel}
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* The selected object names itself once, at the top of the pane; the
+          tabs below it are all about this one thing, so they need no repeat. */}
+      <div className="flex min-h-9 shrink-0 items-center gap-2 border-b px-3 py-2">
+        <span className="shrink-0 text-muted-foreground [&_svg]:size-3.5">
+          {ItemTypeIconMap[iconType] ?? <BoxIcon className="size-3.5" />}
+        </span>
+        <span className="truncate text-xs font-semibold tracking-wide">
+          {entity.name}
+        </span>
+        <span className="ml-auto shrink-0 truncate text-[11px] text-muted-foreground">
+          {typeLabel}
+        </span>
+      </div>
       <Tabs
         key={selected}
         defaultValue="object"
-        className="flex min-h-0 w-full flex-1 flex-col gap-2"
+        className="flex min-h-0 w-full flex-1 flex-col gap-0"
       >
-        <TabsList className="flex w-full shrink-0">
-          <TabsTrigger value="object">Object</TabsTrigger>
-          {tabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="shrink-0 px-3 py-2">
+          <PanelTabsList>
+            <PanelTabsTrigger value="object">Object</PanelTabsTrigger>
+            {tabs.map((tab) => (
+              <PanelTabsTrigger key={tab.value} value={tab.value}>
+                {tab.label}
+              </PanelTabsTrigger>
+            ))}
+          </PanelTabsList>
+        </div>
         <TabsContent
           value="object"
-          className="min-h-0 flex-1 overflow-y-auto no-scrollbar"
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 no-scrollbar"
         >
           <ObjectContext />
         </TabsContent>
@@ -124,7 +130,7 @@ export const ExplorerTabs = () => {
           <TabsContent
             key={tab.value}
             value={tab.value}
-            className="min-h-0 flex-1 overflow-y-auto no-scrollbar"
+            className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 no-scrollbar"
           >
             <TypeBasedTabs key={tab.value} type={tab.value} />
           </TabsContent>

@@ -7,6 +7,8 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { confirm } from "@/components/confirm";
+import { PanelEmpty } from "@/components/panels/panel-empty";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -78,34 +80,32 @@ export const EffectsExplorer = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-sm font-medium">
-            <Layers size={14} />
-            Effects Stack
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Drag to reorder the post-process chain.
-          </p>
-        </div>
+      <PanelHeader
+        icon={Layers}
+        title="Effects stack"
+        hint={
+          orderedEffects.length > 0 ? `${orderedEffects.length}` : undefined
+        }
+        className="border-b"
+      >
         <Button
           size="icon"
           variant="ghost"
+          className="size-7"
           title="Clear effects"
           onClick={onClear}
           disabled={orderedEffects.length === 0}
         >
-          <Trash2Icon size={14} />
+          <Trash2Icon size={13} />
         </Button>
-      </div>
+      </PanelHeader>
 
       {orderedEffects.length === 0 ? (
-        <div className="grid flex-1 place-items-center px-4 text-center text-sm text-muted-foreground">
-          <div>
-            <Sparkles className="mx-auto mb-2 size-5" />
-            Add a preset or choose an effect from the details panel.
-          </div>
-        </div>
+        <PanelEmpty
+          icon={Sparkles}
+          title="No effects"
+          description="Add a preset or pick an effect from the details panel."
+        />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           <ol className="grid gap-1.5">
@@ -215,6 +215,12 @@ export const EffectsExplorer = () => {
               );
             })}
           </ol>
+          {/* Only worth saying once there is something to reorder. */}
+          {orderedEffects.length > 1 && (
+            <p className="px-1 pt-2 text-[11px] text-muted-foreground">
+              Drag to reorder the post-process chain.
+            </p>
+          )}
         </div>
       )}
     </div>

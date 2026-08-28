@@ -13,6 +13,49 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
+/**
+ * Acronyms that must stay upper-case once a key is turned into a label.
+ * Keyed by the lower-cased word so the lookup is casing-agnostic.
+ */
+const LABEL_ACRONYMS: Record<string, string> = {
+  fov: "FOV",
+  uuid: "UUID",
+  id: "ID",
+  hdr: "HDR",
+  rgb: "RGB",
+  fps: "FPS",
+  ao: "AO",
+  dof: "DoF",
+  url: "URL",
+};
+
+/**
+ * Many inspector fields are generated straight from object keys, so their
+ * labels arrive as `fov` or `castShadow`. Casing is a presentation decision, so
+ * it is settled here rather than at every call site that builds fields.
+ *
+ * An authored label — anything that already starts upper-case or contains a
+ * space — is left exactly as written.
+ */
+export function formatFieldLabel(label: string) {
+  if (!label) return label;
+  if (label.includes(" ") || label[0] !== label[0].toLowerCase()) return label;
+
+  const words = label
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[\s_-]+/)
+    .filter(Boolean);
+
+  return words
+    .map((word, index) => {
+      const acronym = LABEL_ACRONYMS[word.toLowerCase()];
+      if (acronym) return acronym;
+      if (index > 0) return word.toLowerCase();
+      return word[0].toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
 type InspectorValue = string | number | boolean;
 type SelectInspectorField = Extract<InspectorField, { kind: "select" }>;
 type InspectorButtonTone = "primary" | "secondary" | "danger";
@@ -261,7 +304,7 @@ function InspectorRow({ field }: { field: InspectorField }) {
       <section className="grid gap-2 border-t border-border/70 pt-3 first:border-t-0 first:pt-0">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {field.label}
+            {formatFieldLabel(field.label)}
           </div>
           {field.description ? (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -297,7 +340,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
     return (
       <div className="grid gap-1.5">
         {field.label ? (
-          <Label className="text-xs text-muted-foreground">{field.label}</Label>
+          <Label className="text-xs text-muted-foreground">
+            {formatFieldLabel(field.label)}
+          </Label>
         ) : null}
         <div
           className={cn(
@@ -326,7 +371,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
   if (field.kind === "readonly") {
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 text-xs">
-        <Label className="text-muted-foreground/90">{field.label}</Label>
+        <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <div className="min-w-0 truncate rounded-md bg-muted/25 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
           {formatReadonlyValue(field.value)}
         </div>
@@ -337,7 +384,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
   if (field.kind === "boolean") {
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 py-0.5 text-xs">
-        <Label className="text-muted-foreground/90">{field.label}</Label>
+        <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <Switch
           size="sm"
           checked={field.value}
@@ -355,7 +404,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
 
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 text-xs">
-        <Label className="text-muted-foreground/90">{field.label}</Label>
+        <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <Select
           value={selected}
           disabled={field.disabled}
@@ -383,7 +434,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
     const labels = ["x", "y", "z"] as const;
     return (
       <div className="grid gap-1.5 text-xs">
-        <Label className="text-muted-foreground/90">{field.label}</Label>
+        <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <div className="grid grid-cols-3 gap-1.5">
           {labels.map((axis, index) => (
             <NumericInput
@@ -417,7 +470,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
 
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-start gap-2 text-xs">
-        <Label className="pt-2 text-muted-foreground/90">{field.label}</Label>
+        <Label className="pt-2 text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <div className="grid gap-1.5">
           <div className="grid grid-cols-2 gap-1.5">
             <NumericInput
@@ -463,7 +518,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
   if (field.kind === "color") {
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 text-xs">
-        <Label className="text-muted-foreground/90">{field.label}</Label>
+        <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <div className="flex items-center gap-2">
           <Input
             type="color"
@@ -489,7 +546,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
 
     return (
       <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-start gap-2 text-xs">
-        <Label className="pt-2 text-muted-foreground/90">{field.label}</Label>
+        <Label className="pt-2 text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
         <div className="grid gap-1.5">
           <NumericInput
             className="h-8 bg-muted/20 px-2 font-mono"
@@ -520,7 +579,9 @@ function InspectorRow({ field }: { field: InspectorField }) {
 
   return (
     <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 text-xs">
-      <Label className="text-muted-foreground/90">{field.label}</Label>
+      <Label className="text-muted-foreground/90">
+          {formatFieldLabel(field.label)}
+        </Label>
       <Input
         className="h-8 bg-muted/20 px-2"
         value={field.value}

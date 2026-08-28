@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  Boxes,
-  ChevronDown,
-  ChevronRight,
   CheckCircle2,
   Clock,
   Code2,
@@ -60,7 +57,14 @@ import {
   loadExportHistory,
   type ExportHistoryEntry,
 } from "@/utils/export-history";
+import { PanelEmpty } from "@/components/panels/panel-empty";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { SequencePreview } from "./export-workbench/sequence-preview";
+import { AtlasMap } from "./export-workbench/atlas-map";
+import {
+  ControlGroup,
+  PanelSection,
+} from "./export-workbench/panel-section";
 import { SpritePostprocessWorkbench } from "./export-workbench/sprite-postprocess";
 import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
 import { useFitCamera } from "@/hooks/next/use-fit-camera";
@@ -154,26 +158,6 @@ function getFormatLogo(format: ExportFormat, theme: "light" | "dark") {
   const logo = FORMAT_LOGOS[format];
   if (!logo) return undefined;
   return theme === "dark" && logo.dark ? logo.dark : logo.light;
-}
-
-function Stat({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: string | number;
-  icon: LucideIcon;
-}) {
-  return (
-    <div className="rounded-md border px-3 py-2">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon size={13} />
-        {label}
-      </div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-    </div>
-  );
 }
 
 function MiniStat({
@@ -339,6 +323,7 @@ function ValidationMessages({
 function NumberField({
   label,
   value,
+  unit,
   min = 0,
   step = 1,
   inputTestId,
@@ -346,6 +331,8 @@ function NumberField({
 }: {
   label: string;
   value: number;
+  /** Rendered inside the field, so the label stays a name and not a spec. */
+  unit?: string;
   min?: number;
   step?: number;
   inputTestId?: string;
@@ -353,16 +340,78 @@ function NumberField({
 }) {
   return (
     <label className="grid gap-1 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <Input
-        type="number"
-        data-testid={inputTestId}
-        min={min}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+      <span className="truncate text-muted-foreground">{label}</span>
+      <span className="relative">
+        <Input
+          type="number"
+          data-testid={inputTestId}
+          min={min}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className={cn("tabular-nums", unit && "pe-8")}
+        />
+        {unit && (
+          <span className="pointer-events-none absolute inset-y-0 end-2 flex items-center text-[10px] text-muted-foreground">
+            {unit}
+          </span>
+        )}
+      </span>
     </label>
+  );
+}
+
+/** Preflight state as one glanceable chip, so the header carries the verdict. */
+function StatusPill({
+  blocking,
+  warnings,
+  className,
+}: {
+  blocking: boolean;
+  warnings: number;
+  className?: string;
+}) {
+  const tone = blocking
+    ? "border-destructive/30 bg-destructive/10 text-destructive"
+    : warnings > 0
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
+  const label = blocking
+    ? "Needs fixes"
+    : warnings > 0
+      ? `${warnings} warning${warnings === 1 ? "" : "s"}`
+      : "Ready";
+
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+        tone,
+        className,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function EmptyCapture({ isRecording }: { isRecording: boolean }) {
+  return (
+    <PanelEmpty
+      icon={Film}
+      title="No frames captured"
+      description="Pose the scene, then record a sequence to build an atlas."
+      boxed
+    >
+      <Button
+        size="sm"
+        disabled={isRecording}
+        onClick={() => PubSub.emit(EventType.START_ASSETS_CREATION)}
+      >
+        <Play size={13} />
+        Record sequence
+      </Button>
+    </PanelEmpty>
   );
 }
 
@@ -515,11 +564,17 @@ export function ExportWorkbench() {
   const setAtlasOptions = useSettingsStore((state) => state.setAtlasOptions);
 
   const { fitCameraToAnimation } = useFitCamera();
+  const postprocessEnabled = useSpritePostprocessStore((state) => state.enabled);
+  const postprocessEffectCount = useSpritePostprocessStore(
+    (state) => state.effects.filter((effect) => effect.enabled).length,
+  );
+  const postprocessHint = postprocessEnabled
+    ? `${postprocessEffectCount} on`
+    : "off";
 
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [recentExportsCollapsed, setRecentExportsCollapsed] = useState(true);
   const [history, setHistory] = useState<ExportHistoryEntry[]>(() =>
     loadExportHistory(),
   );
@@ -629,95 +684,111 @@ export function ExportWorkbench() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <header className="shrink-0 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <FileArchive size={17} />
-          <h2 className="text-sm font-semibold">Export Workbench</h2>
+      <PanelHeader icon={FileArchive} title="Export">
+        <StatusPill blocking={validation.blocking} warnings={warningCount} />
+      </PanelHeader>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        {/* Focal: the artefact itself, not a tally of it. */}
+        <div className="px-3 pb-4">
+          {rows.length === 0 ? (
+            <EmptyCapture isRecording={isRecording} />
+          ) : (
+            <AtlasMap
+              plan={validation.plan ?? null}
+              frameCount={summary.frameCount}
+              sequenceCount={summary.animationCount}
+            />
+          )}
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Review captures, prepare atlas output, and package engine files.
-        </p>
-      </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
-        <section className="grid grid-cols-2 gap-2">
-          <Stat label="Sequences" value={summary.animationCount} icon={Film} />
-          <Stat label="Frames" value={summary.frameCount} icon={ImageIcon} />
-          <Stat
-            label="Pages"
-            value={summary.pageCount || "-"}
-            icon={SquareStack}
-          />
-          <Stat
-            label="Frame"
-            value={`${exportWidth}x${exportHeight}`}
-            icon={Boxes}
-          />
-        </section>
-
-        <section className="mt-3 rounded-md border">
-          <div className="border-b px-3 py-2 text-sm font-medium">Capture</div>
-          <div className="grid gap-2 p-3">
-            <div className="grid grid-cols-2 gap-2">
+        <PanelSection
+          title="Capture"
+          defaultOpen={rows.length === 0}
+          hint={`${exportWidth}×${exportHeight} · ${iterations}f`}
+        >
+          <div className="grid gap-3">
+            <ControlGroup label="Timing">
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="Interval"
+                  unit="ms"
+                  value={intervals}
+                  min={1}
+                  onChange={setIntervals}
+                />
+                <NumberField
+                  label="Frames"
+                  value={iterations}
+                  min={1}
+                  onChange={setIterations}
+                />
+              </div>
+              {/* Named `fps` in the store, but it reaches gif.js as `delay`. */}
               <NumberField
-                label="Frame interval ms"
-                value={intervals}
-                min={1}
-                onChange={setIntervals}
-              />
-              <NumberField
-                label="Frames"
-                value={iterations}
-                min={1}
-                onChange={setIterations}
-              />
-              <NumberField
-                label="Frame duration"
+                label="GIF frame delay"
+                unit="ms"
                 value={fps}
                 min={1}
                 onChange={setFPS}
               />
-              <NumberField
-                label="Width"
-                value={exportWidth}
-                min={1}
-                onChange={setExportWidth}
-              />
-              <NumberField
-                label="Height"
-                value={exportHeight}
-                min={1}
-                onChange={setExportHeight}
-              />
-              <NumberField
-                label="Margin px"
-                value={fitMargin}
-                min={0}
-                onChange={setFitMargin}
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const result = fitCameraToAnimation({
-                  margin: fitMargin,
-                  marginUnit: "px",
-                });
-                if (result.fitted) {
-                  toast.success(
-                    `Camera fitted at distance ${result.distance?.toFixed(2)}`,
-                  );
-                } else {
-                  toast.error(result.warnings[0] ?? "Nothing to fit.");
-                }
-              }}
-            >
-              <Crosshair size={14} />
-              Fit camera to animation
-            </Button>
-            <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              Capture normal maps
+            </ControlGroup>
+
+            <ControlGroup label="Frame size">
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="Width"
+                  unit="px"
+                  value={exportWidth}
+                  min={1}
+                  onChange={setExportWidth}
+                />
+                <NumberField
+                  label="Height"
+                  unit="px"
+                  value={exportHeight}
+                  min={1}
+                  onChange={setExportHeight}
+                />
+              </div>
+            </ControlGroup>
+
+            <ControlGroup label="Framing">
+              <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                <NumberField
+                  label="Safe margin"
+                  unit="px"
+                  value={fitMargin}
+                  min={0}
+                  onChange={setFitMargin}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  title="Solve a camera distance that fits every animation inside this margin"
+                  onClick={() => {
+                    const result = fitCameraToAnimation({
+                      margin: fitMargin,
+                      marginUnit: "px",
+                    });
+                    if (result.fitted) {
+                      toast.success(
+                        `Fitted at distance ${result.distance?.toFixed(2)}`,
+                      );
+                    } else {
+                      toast.error(result.warnings[0] ?? "Nothing to fit.");
+                    }
+                  }}
+                >
+                  <Crosshair size={13} />
+                  Fit
+                </Button>
+              </div>
+            </ControlGroup>
+
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Capture normal maps</span>
               <Switch
                 checked={exportNormalMap}
                 onCheckedChange={(checked) =>
@@ -725,14 +796,15 @@ export function ExportWorkbench() {
                 }
               />
             </label>
-            <div className="grid grid-cols-3 gap-2">
+
+            <div className="grid grid-cols-3 gap-1.5">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => PubSub.emit(EventType.START_ASSETS_CREATION)}
                 disabled={isRecording}
               >
-                <Play size={14} />
+                <Play size={13} />
                 Record
               </Button>
               <Button
@@ -740,7 +812,7 @@ export function ExportWorkbench() {
                 variant="outline"
                 onClick={() => PubSub.emit(EventType.TAKE_SINGLE_SCREENSHOT)}
               >
-                <Plus size={14} />
+                <Plus size={13} />
                 Frame
               </Button>
               <Button
@@ -748,112 +820,107 @@ export function ExportWorkbench() {
                 variant="outline"
                 onClick={() => PubSub.emit(EventType.NEW_SEQUENCE)}
               >
-                <Layers size={14} />
+                <Layers size={13} />
                 Row
               </Button>
             </div>
           </div>
-        </section>
+        </PanelSection>
 
-        <SequencePreview />
+        <PanelSection
+          title="Sequences"
+          autoOpenOn={rows.length > 0}
+          keepMounted
+          hint={
+            summary.animationCount > 0 ? `${summary.animationCount}` : undefined
+          }
+        >
+          <SequencePreview />
+        </PanelSection>
 
-        <SpritePostprocessWorkbench rows={rows} atlasOptions={atlasOptions} />
+        <PanelSection title="Effects" hint={postprocessHint}>
+          <SpritePostprocessWorkbench rows={rows} atlasOptions={atlasOptions} />
+        </PanelSection>
 
-        <section className="mt-3 rounded-md border">
-          <div className="border-b px-3 py-2 text-sm font-medium">Output</div>
-          <div className="grid gap-2 p-3 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Format</span>
-              <span className="font-medium">{selectedExporter.label}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Layout</span>
-              <span className="capitalize">{atlasLayout}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Normal maps</span>
-              <span className="capitalize">{summary.normalStatus}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Atlas</span>
-              <span>
-                {summary.imageWidth}x{summary.imageHeight}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-3">
-          <ValidationMessages messages={validation.messages.slice(0, 3)} />
-        </section>
-
-        <section className="mt-3 rounded-md border">
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <button
-              type="button"
-              className="flex min-w-0 items-center gap-1.5 text-sm font-medium"
-              onClick={() => setRecentExportsCollapsed((value) => !value)}
-            >
-              {recentExportsCollapsed ? (
-                <ChevronRight size={14} className="text-muted-foreground" />
-              ) : (
-                <ChevronDown size={14} className="text-muted-foreground" />
-              )}
-              <span>Recent Exports</span>
-              {history.length > 0 && (
-                <span className="rounded-full border bg-muted px-1.5 py-0 text-[10px] text-muted-foreground">
-                  {history.length}
-                </span>
-              )}
-            </button>
-            <Button
-              size="icon"
-              variant="ghost"
-              title="Clear export history"
-              onClick={() => setHistory(clearExportHistory())}
-              disabled={history.length === 0}
-            >
-              <Trash2Icon size={14} />
-            </Button>
-          </div>
-          {!recentExportsCollapsed && (
-          <div className="grid gap-2 p-3">
-            {history.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Successful exports will appear here.
-              </p>
-            ) : (
-              history.slice(0, 5).map((entry) => (
-                <div key={entry.id} className="rounded-md border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2 text-xs">
+        <PanelSection
+          title="Recent exports"
+          hint={history.length > 0 ? `${history.length}` : undefined}
+        >
+          {history.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              Successful exports will appear here.
+            </p>
+          ) : (
+            <div className="grid gap-1.5">
+              {history.slice(0, 5).map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-sm bg-muted/40 px-2.5 py-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
                     <span className="truncate font-medium">
                       {entry.filename}
                     </span>
-                    <span className="text-muted-foreground">
+                    <span className="shrink-0 text-muted-foreground tabular-nums">
                       {formatTimestamp(entry.timestamp)}
                     </span>
                   </div>
-                  <div className="mt-1 text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
                     {entry.format} · {entry.frameCount} frames ·{" "}
                     {entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="justify-start text-muted-foreground"
+                onClick={() => setHistory(clearExportHistory())}
+              >
+                <Trash2Icon size={13} />
+                Clear history
+              </Button>
+            </div>
           )}
-        </section>
+        </PanelSection>
       </div>
 
-      <footer className="shrink-0 border-t p-3">
+      {/* Focal: the one action, and everything you need to trust it. */}
+      <footer className="shrink-0 border-t bg-muted/40 p-3">
+        {validation.messages.length > 0 && (
+          <div className="mb-2.5">
+            <ValidationMessages messages={validation.messages.slice(0, 2)} />
+            {validation.messages.length > 2 && (
+              <button
+                type="button"
+                onClick={() => setPreflightOpen(true)}
+                className="mt-1 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+              >
+                +{validation.messages.length - 2} more in preflight
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="truncate text-xs font-medium">
+            {selectedExporter.label}
+          </span>
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {rows.length === 0
+              ? "nothing to export"
+              : `${outputFiles.length} file${outputFiles.length === 1 ? "" : "s"}`}
+          </span>
+        </div>
+
         <Button
           className="w-full gap-2"
           data-testid="prepare-export-button"
           onClick={() => setPreflightOpen(true)}
-          disabled={exporting}
+          disabled={exporting || rows.length === 0}
         >
           <Download size={15} />
-          {exporting ? "Exporting" : "Prepare Export"}
+          {exporting ? "Exporting…" : "Prepare Export"}
         </Button>
       </footer>
 

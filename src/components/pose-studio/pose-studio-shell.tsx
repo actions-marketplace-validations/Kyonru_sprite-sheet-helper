@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -367,28 +368,6 @@ function QualityBadge({ quality }: { quality: PoseQualityResult }) {
   );
 }
 
-function PanelHeader({
-  icon: Icon,
-  title,
-  detail,
-}: {
-  icon: LucideIcon;
-  title: string;
-  detail?: string;
-}) {
-  return (
-    <div className="flex min-h-10 items-center gap-2 border-b px-3">
-      <Icon size={15} />
-      <span className="text-sm font-medium">{title}</span>
-      {detail && (
-        <span className="ml-auto truncate text-xs text-muted-foreground">
-          {detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function SourceModeButton({
   active,
   icon: Icon,
@@ -581,7 +560,12 @@ function PoseSourcePanel({
 
   return (
     <aside className="flex min-h-0 flex-col border-r bg-background">
-      <PanelHeader icon={Camera} title="Capture" detail={inputMode} />
+      <PanelHeader
+        icon={Camera}
+        title="Capture"
+        hint={inputMode}
+        className="border-b"
+      />
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
         <div className="grid gap-2">
           {isWeb() && (
@@ -1274,7 +1258,12 @@ function PoseInspector({
 
   return (
     <aside className="flex min-h-0 flex-col border-l bg-background">
-      <PanelHeader icon={Settings2} title="Inspector" detail={tab} />
+      <PanelHeader
+        icon={Settings2}
+        title="Inspector"
+        hint={tab}
+        className="border-b"
+      />
       <div className="grid grid-cols-4 gap-1 border-b p-2">
         {(["assist", "mapping", "edit", "save"] as const).map((item) => (
           <Button

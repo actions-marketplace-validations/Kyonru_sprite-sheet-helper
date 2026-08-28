@@ -13,6 +13,8 @@ import { ItemTypeIconMap } from "./constants";
 import { cn } from "@/lib/utils";
 import { Boxes, Eye, EyeOff, ListTree, Trash2Icon } from "lucide-react";
 import { confirm } from "@/components/confirm";
+import { PanelEmpty } from "@/components/panels/panel-empty";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { useRemoveEntity } from "@/hooks/next/use-remove-entity";
 import type { Entity } from "@/types/ecs";
 
@@ -131,26 +133,23 @@ export const ObjectExplorer = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-sm font-medium">
-            <ListTree size={14} />
-            Scene
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {entityCount} object{entityCount === 1 ? "" : "s"} · click to
-            inspect
-          </p>
-        </div>
-      </div>
+      <PanelHeader
+        icon={ListTree}
+        title="Scene"
+        hint={
+          entityCount > 0
+            ? `${entityCount} object${entityCount === 1 ? "" : "s"}`
+            : undefined
+        }
+        className="border-b"
+      />
 
       {entityCount === 0 ? (
-        <div className="grid flex-1 place-items-center px-4 text-center text-sm text-muted-foreground">
-          <div>
-            <Boxes className="mx-auto mb-2 size-5" />
-            The scene is empty. Import a model to get started.
-          </div>
-        </div>
+        <PanelEmpty
+          icon={Boxes}
+          title="Empty scene"
+          description="Import a model to start posing and capturing frames."
+        />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-1">
           <UncontrolledTreeEnvironment

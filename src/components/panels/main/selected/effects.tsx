@@ -13,7 +13,12 @@ import { confirm } from "@/components/confirm";
 import { openShaderEditor } from "@/components/custom-shader-modal";
 import { InspectorPanel, type InspectorField } from "@/components/inspector";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { PanelHeader } from "@/components/panels/panel-header";
+import {
+  PanelTabsList,
+  PanelTabsTrigger,
+} from "@/components/panels/panel-tabs";
 import {
   BLEND_FUNCTIONS,
   EDGE_DETECTION_MODES,
@@ -507,39 +512,35 @@ export const EffectsTabs = () => {
     : "No effect selected";
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <section className="shrink-0 rounded-md border bg-background p-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <Sparkles size={14} />
-              Effects Workbench
-            </div>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {stackCount} effect{stackCount === 1 ? "" : "s"} in stack ·{" "}
-              {title}
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="flex h-full min-h-0 flex-col">
+      <PanelHeader
+        icon={Sparkles}
+        title="Effects"
+        hint={stackCount > 0 ? title : "none selected"}
+        className="border-b"
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Tabs defaultValue="details" className="grid gap-2">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="presets">Presets</TabsTrigger>
-            <TabsTrigger value="add">Add</TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="details" className="grid gap-0">
+          <div className="px-3 py-2">
+            <PanelTabsList className="grid grid-cols-3">
+              <PanelTabsTrigger value="presets">Presets</PanelTabsTrigger>
+              <PanelTabsTrigger value="add">Add</PanelTabsTrigger>
+              <PanelTabsTrigger value="details">Details</PanelTabsTrigger>
+            </PanelTabsList>
+          </div>
 
-          <GuidancePanel />
+          <div className="px-3 pb-3">
+            <GuidancePanel />
+          </div>
 
-          <TabsContent value="presets" className="mt-0">
+          <TabsContent value="presets" className="mt-0 px-3 pb-3">
             <PresetsPanel />
           </TabsContent>
-          <TabsContent value="add" className="mt-0">
+          <TabsContent value="add" className="mt-0 px-3 pb-3">
             <EffectBrowser />
           </TabsContent>
-          <TabsContent value="details" className="mt-0">
+          <TabsContent value="details" className="mt-0 px-3 pb-3">
             <DetailsPanel />
           </TabsContent>
         </Tabs>
