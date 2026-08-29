@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -25,9 +25,11 @@ import { Field, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrubField } from "@/components/ui/scrub-field";
+import { SheetPicker } from "@/components/export-workbench/sheet-assignments";
 import { confirm } from "@/components/confirm";
 import { reorderItems } from "@/components/animation-reorder-modal";
 import { useImagesStore } from "@/store/next/images";
+import { DEFAULT_SHEET_NAME, getRowSheetName } from "@/utils/exports/sheets";
 import { captureIntervalFromFps } from "@/utils/exports/helpers";
 import { addDataToImageIfNeeded } from "@/utils/images";
 import {
@@ -76,6 +78,14 @@ function SequenceRow({
   const updateFps = useImagesStore((state) => state.updateFps);
   const updateImagesRow = useImagesStore((state) => state.updateImagesRow);
   const normalStatus = getNormalCoverageForRow(row).status;
+  const allRows = useImagesStore((state) => state.images);
+  // Every sheet already in play, so moving a sequence beside its neighbours is
+  // a pick rather than a retype.
+  const sheetNames = useMemo(() => {
+    const names = new Set([DEFAULT_SHEET_NAME]);
+    for (const item of allRows) names.add(getRowSheetName(item));
+    return [...names];
+  }, [allRows]);
 
   return (
     <div className="flex items-center gap-1">
@@ -96,6 +106,11 @@ function SequenceRow({
         </div>
         <NormalStatusBadge status={normalStatus} />
       </button>
+
+      {/* Which spritesheet this sequence is packed into. It sits on the row
+          rather than in the export dialog alone, because the decision is about
+          this sequence, and this is where the sequence is. */}
+      <SheetPicker row={row} sheetNames={sheetNames} />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

@@ -44,6 +44,15 @@ export interface ExportRow {
   frameWidth: number;
   frameHeight: number;
   fps: number;
+  /**
+   * Which spritesheet this sequence is packed into.
+   *
+   * Sequences sharing a name share an atlas; the rest are packed and written
+   * separately. Absent means the default sheet, which is every sequence until
+   * someone splits them — so a project that never touches this exports exactly
+   * as it did before sheets existed.
+   */
+  sheet?: string;
   metadata?: ExportRowMetadata;
 }
 

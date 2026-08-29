@@ -60,6 +60,7 @@ import {
 } from "./export-workbench/pipeline";
 import { AtlasMap } from "./export-workbench/atlas-map";
 import { PackSettings } from "./export-workbench/pack-settings";
+import { SheetAssignments } from "./export-workbench/sheet-assignments";
 import { WritesTree } from "./export-workbench/writes-tree";
 import {
   ControlGroup,
@@ -126,6 +127,14 @@ const FORMAT_NOTES: Partial<
  * Category order for the export dialog. Declared rather than derived: the
  * generic atlas is what most people want, engine packages are the long tail.
  */
+/**
+ * Below this share of the page in use, the atlas is mostly empty space.
+ *
+ * Above it the number is not actionable — the packer is already doing its job —
+ * so the readout stays quiet rather than reporting a figure nobody acts on.
+ */
+const WASTED_PAGE_COVERAGE = 0.2;
+
 /**
  * Tallest the atlas miniature gets in the export dialog.
  *
@@ -527,6 +536,8 @@ export function ExportWorkbench() {
 
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const [preflightOpen, setPreflightOpen] = useState(false);
+  /** Which sheet the dialog's map and readout are showing. */
+  const [selectedSheet, setSelectedSheet] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [history, setHistory] = useState<ExportHistoryEntry[]>(() =>
@@ -568,6 +579,11 @@ export function ExportWorkbench() {
     [atlasOptions, rows],
   );
 
+  const sheets = validation.sheets;
+  // A sheet can vanish under the selection: reassign the last sequence out of
+  // one and it stops existing, which must not leave the map pointed at nothing.
+  const activeSheet = sheets[Math.min(selectedSheet, sheets.length - 1)] ?? null;
+
   /**
    * The width the miniature will actually occupy, so the readout beside it can
    * be laid out against a real number instead of a column that only the map
@@ -576,16 +592,15 @@ export function ExportWorkbench() {
    * map's own 2:1 placeholder when there is no page yet.
    */
   const mapWidth = useMemo(() => {
-    const ratio =
-      summary.imageWidth > 0 && summary.imageHeight > 0
-        ? summary.imageWidth / summary.imageHeight
-        : 2;
+    const width = activeSheet?.imageWidth ?? 0;
+    const height = activeSheet?.imageHeight ?? 0;
+    const ratio = width > 0 && height > 0 ? width / height : 2;
     return Math.round(PREFLIGHT_MAP_HEIGHT * ratio);
-  }, [summary.imageHeight, summary.imageWidth]);
+  }, [activeSheet?.imageHeight, activeSheet?.imageWidth]);
 
   const pageCoverage = useMemo(
-    () => getAtlasPageCoverage(validation.plan),
-    [validation.plan],
+    () => getAtlasPageCoverage(activeSheet?.plan ?? null),
+    [activeSheet?.plan],
   );
 
   /**
@@ -872,8 +887,8 @@ export function ExportWorkbench() {
           index={4}
           title="Pack"
           hint={
-            validation.plan
-              ? `${validation.plan.pages[0]?.width ?? 0}×${validation.plan.pages[0]?.height ?? 0}`
+            activeSheet?.plan
+              ? `${sheets.length > 1 ? `${sheets.length} sheets · ` : ""}${activeSheet.imageWidth}×${activeSheet.imageHeight}`
               : undefined
           }
           state={stageStateFor(
@@ -886,11 +901,44 @@ export function ExportWorkbench() {
             {rows.length === 0 ? (
               <EmptyCapture isRecording={isRecording} />
             ) : (
-              <AtlasMap
-                plan={validation.plan ?? null}
-                frameCount={summary.frameCount}
-                sequenceCount={summary.animationCount}
-              />
+              <>
+                {/* One map per rail, so it shows one sheet: the chips say
+                    which, and say plainly that there is more than one atlas
+                    coming out — the map alone would read as the whole export. */}
+                {sheets.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {sheets.map((sheet, index) => {
+                      const active =
+                        index === Math.min(selectedSheet, sheets.length - 1);
+                      return (
+                        <button
+                          key={sheet.name}
+                          type="button"
+                          onClick={() => setSelectedSheet(index)}
+                          aria-pressed={active}
+                          className={cn(
+                            "flex h-[19px] items-center gap-1.5 rounded-md border px-2 text-[10px] transition-colors",
+                            active
+                              ? "border-transparent bg-brand-soft font-semibold text-foreground"
+                              : "border-stroke text-muted-foreground hover:bg-row-hover hover:text-foreground",
+                          )}
+                        >
+                          <span className="max-w-28 truncate">{sheet.name}</span>
+                          <span className="font-mono text-[9px] text-faint-foreground tabular-nums">
+                            {sheet.frameCount}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <AtlasMap
+                  plan={activeSheet?.plan ?? null}
+                  rows={activeSheet?.rows}
+                  frameCount={activeSheet?.frameCount ?? 0}
+                  sequenceCount={activeSheet?.animationCount ?? 0}
+                />
+              </>
             )}
             {stageMessages.pack.map((message, index) => (
               <ValidationNote key={index} message={message} showDetail />
@@ -1124,9 +1172,10 @@ export function ExportWorkbench() {
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 shrink" style={{ flexBasis: mapWidth }}>
                   <AtlasMap
-                    plan={validation.plan ?? null}
-                    frameCount={summary.frameCount}
-                    sequenceCount={summary.animationCount}
+                    plan={activeSheet?.plan ?? null}
+                    rows={activeSheet?.rows}
+                    frameCount={activeSheet?.frameCount ?? 0}
+                    sequenceCount={activeSheet?.animationCount ?? 0}
                     compact
                     maxHeight={PREFLIGHT_MAP_HEIGHT}
                   />
@@ -1134,25 +1183,23 @@ export function ExportWorkbench() {
                 {/*
                   Same border, tone and radius as the map beside it: one readout
                   in two halves, the picture and its spec, rather than a card
-                  parked next to a picture. Capped, because a 10:1 atlas fills
-                  the row and drops this onto its own line — where a full-width
-                  panel would fling every label and value to opposite edges of
-                  the dialog.
+                  parked next to a picture. Narrow on purpose — three short rows
+                  need no more, and a panel stretched to the pane would put a
+                  hand's width of nothing between each label and its value.
                 */}
-                <dl className="grid min-w-40 max-w-md flex-1 content-start gap-2.5 rounded-md border border-stroke bg-surface-sunken p-2.5">
-                  {/* Every fact is a micro-label with its value under it, so
-                      nothing is separated from its own label by a stretch of
-                      whitespace that changes width with the atlas. */}
+                <dl className="grid min-w-40 max-w-3xs flex-1 content-start gap-2.5 rounded-md border border-stroke bg-surface-sunken p-2.5">
                   <div>
                     <dt className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
-                      Atlas page
+                      {sheets.length > 1 && activeSheet
+                        ? activeSheet.name
+                        : "Atlas page"}
                     </dt>
                     {/* The headline: the one number here that decides whether
                         the atlas fits the target, so it is the one that reads
                         first. */}
                     <dd className="mt-1 font-mono text-[15px] font-semibold leading-none tabular-nums">
-                      {summary.imageWidth > 0
-                        ? `${summary.imageWidth}×${summary.imageHeight}`
+                      {activeSheet && activeSheet.imageWidth > 0
+                        ? `${activeSheet.imageWidth}×${activeSheet.imageHeight}`
                         : "—"}
                       <span className="ms-1 text-[9px] font-normal text-faint-foreground">
                         px
@@ -1160,53 +1207,83 @@ export function ExportWorkbench() {
                     </dd>
                   </div>
 
-                  {/* A strip of facts, not a two-column table: at a fixed
-                      column each value drifted to the middle of the panel, far
-                      from the label above it. */}
-                  <div className="flex flex-wrap gap-x-8 gap-y-2 border-t border-stroke pt-2.5">
+                  <div className="grid gap-1.5 border-t border-stroke pt-2.5">
                     {[
-                      ["Pages", `${summary.pageCount}`],
-                      ["Frames", `${summary.frameCount}`],
+                      ["Pages", `${activeSheet?.pageCount ?? 0}`],
+                      ["Frames", `${activeSheet?.frameCount ?? 0}`],
+                      ...(sheets.length > 1
+                        ? ([["Sheets", `${sheets.length}`]] as const)
+                        : []),
                     ].map(([label, value]) => (
-                      <div key={label}>
-                        <dt className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                      <div
+                        key={label}
+                        className="flex items-baseline justify-between gap-2"
+                      >
+                        <dt className="text-[10px] text-faint-foreground">
                           {label}
                         </dt>
-                        <dd className="mt-0.5 font-mono text-[11px] leading-none tabular-nums">
+                        <dd className="font-mono text-[11px] tabular-nums">
                           {value}
                         </dd>
                       </div>
                     ))}
-                  </div>
 
-                  {summary.imageWidth > 0 && (
-                    <div className="border-t border-stroke pt-2.5">
-                      <dt className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
-                        Page used
-                      </dt>
-                      {/*
-                        The map shows waste as bare checkerboard; this puts a
-                        number on it, for deciding whether a smaller max size
-                        would still hold the frames. The bar takes the slack —
-                        the one element here that is supposed to stretch.
-                      */}
-                      <dd className="mt-1.5 flex items-center gap-2">
-                        <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-high">
-                          <span
-                            className="block h-full rounded-full bg-brand"
-                            style={{
-                              width: `${Math.round(pageCoverage * 100)}%`,
-                            }}
-                          />
-                        </span>
-                        <span className="font-mono text-[11px] tabular-nums">
-                          {Math.round(pageCoverage * 100)}%
-                        </span>
-                      </dd>
-                    </div>
-                  )}
+                    {/*
+                      Coverage only earns a row when it is bad enough to act on.
+                      At 74% there is nothing to do about it — the packer is
+                      already doing its job, and a number nobody acts on trains
+                      you to skip the whole panel. Under a fifth of the page in
+                      use means a smaller max size would still hold every frame,
+                      which is worth interrupting for, so that is the only time
+                      it appears.
+                    */}
+                    {(activeSheet?.imageWidth ?? 0) > 0 &&
+                      pageCoverage < WASTED_PAGE_COVERAGE && (
+                        <div className="flex items-baseline justify-between gap-2">
+                          <dt className="text-[10px] text-warn">Page used</dt>
+                          <dd className="font-mono text-[11px] text-warn tabular-nums">
+                            {Math.round(pageCoverage * 100)}%
+                          </dd>
+                        </div>
+                      )}
+                  </div>
                 </dl>
               </div>
+
+              {/*
+                What lands in which spritesheet — and the packing that decides
+                how. Both live here because the map above answers for them: the
+                dialog is where you can see the consequence of a regroup or a
+                padding change without closing anything.
+              */}
+              {rows.length > 0 && (
+                <div className="grid gap-1.5">
+                  <div className="flex items-baseline">
+                    <span className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                      Sheets
+                    </span>
+                    <span className="ml-auto font-mono text-[10px] text-faint-foreground">
+                      {sheets.length} sheet{sheets.length === 1 ? "" : "s"} ·{" "}
+                      {summary.animationCount} sequence
+                      {summary.animationCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <SheetAssignments
+                    sheets={sheets}
+                    selected={Math.min(selectedSheet, sheets.length - 1)}
+                    onSelect={setSelectedSheet}
+                  />
+                </div>
+              )}
+
+              {rows.length > 0 && (
+                <div className="grid gap-1.5">
+                  <span className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                    Packing
+                  </span>
+                  <PackSettings />
+                </div>
+              )}
 
               {/*
                 Same headlines as the rail, word for word. The dialog is the

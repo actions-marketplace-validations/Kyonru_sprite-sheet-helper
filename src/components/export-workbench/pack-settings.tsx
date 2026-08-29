@@ -9,11 +9,11 @@ const SCALES = [1, 2, 4] as const;
 /**
  * How the atlas is packed.
  *
- * These live in the Pack stage rather than the export dialog because that is
- * what they do: they are packing parameters, and the atlas map sits directly
- * above them, so changing padding or scale re-packs the page in view. Putting
- * them behind a modal meant opening a dialog to change how packing works and
- * closing it to see the result.
+ * The same controls appear in the Pack stage and in the export dialog, from
+ * this one component. The rule they follow is that the map has to be in view:
+ * changing padding or scale re-packs the page you are looking at. Both surfaces
+ * show one, so both can host the controls — what is not allowed is a settings
+ * screen you have to close to see what it did.
  */
 export function PackSettings() {
   const atlasLayout = useSettingsStore((state) => state.atlasLayout);

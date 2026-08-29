@@ -46,7 +46,7 @@ In the workbench you can control:
 Atlas settings are chosen in the preflight modal and remembered as last-used settings.
 
 - **Rows / compatible** — Preserves the existing animation row order and frame order. With default atlas settings this matches the old single-page layout.
-- **Packed / production** — Uses deterministic packing without frame rotation to reduce wasted space. Metadata still preserves the original animation and frame order.
+- **Packed / production** — Uses deterministic packing without frame rotation to reduce wasted space. The page width is searched rather than guessed, so a sheet of equal-sized frames comes out as a full grid with no waste, and mixed sizes are shelved and then squeezed with MaxRects. Among layouts of near-equal area the squarer page wins, so you get `576×640` rather than a `160×704` strip. Metadata still preserves the original animation and frame order.
 - **Padding** — Adds empty pixels around each frame slot.
 - **Extrude** — Duplicates frame edge pixels around the content rect to reduce texture sampling artifacts.
 - **Scale** — Scales atlas frame dimensions for export. The preflight modal includes `1x`, `2x`, and `4x` presets plus a custom numeric value.
@@ -55,7 +55,23 @@ Atlas settings are chosen in the preflight modal and remembered as last-used set
 
 Multi-page output is fully supported by the generic Sprite Sheet format. Engine exporters currently block multi-page atlases because their generated helper code expects one texture page. Increase the max atlas size, disable multi-page, or export generic Sprite Sheet when a validation warning reports that an engine format cannot safely export the plan.
 
-Atlas-style exports also include `spritesheet.manifest.json`, a shared metadata file with atlas options, pages, animation names, frame rects, slot rects, normal-map references, source dimensions, and exporter id. Existing exporter-specific JSON files remain unchanged for compatibility.
+Atlas-style exports also include `spritesheet.manifest.json`, a shared metadata file with atlas options, pages, animation names, frame rects, slot rects, normal-map references, source dimensions, exporter id, and the sheet it belongs to. Existing exporter-specific JSON files remain unchanged for compatibility.
+
+## Sheets
+
+Every sequence belongs to a **sheet**, and each sheet is packed and written as its own spritesheet. Until you assign one, every sequence is on the default sheet and the export is exactly what it has always been: `spritesheet.png`, `spritesheet.json`, `spritesheet.manifest.json`.
+
+Assign a sheet from the sequence row in the Capture stage, or from the **Sheets** section of the preflight modal, where the list is grouped by sheet and clicking a sheet header shows that atlas in the map above.
+
+Once more than one sheet is in use, every format writes each sheet separately:
+
+- **Sprite Sheet / engine formats** — one atlas page, JSON and manifest per sheet, named after it (`hero.png`, `hero.json`, `hero.manifest.json`).
+- **Generated code** — one module per sheet (`hero.lua`, `hero.py`, `hero_phaser.ts`, `src/hero.rs`, `hero.h`). Where a language shares one global namespace, the sheet name is carried into the symbols so the files can be used together: Godot gets `class_name HeroHelper`, Unity `class HeroAnimator`, and raylib prefixed types and functions (`HeroAnimation`, `UpdateHeroAnimation`, `HERO_SPRITESHEET_H`). The single example file (`main.lua`, `main.c`, `example.ts`, `src/main.rs`) loads every sheet and animates the first.
+- **Images (ZIP) and GIF (ZIP)** — frames and GIFs are nested under a folder per sheet.
+
+Sheet names are used as filenames, so characters a path cannot carry are replaced with `-`. Two names that reduce to the same filename stay separate sheets; the second gets a numbered stem.
+
+Each sheet is packed on its own, so max atlas size, multi-page limits and validation are evaluated per sheet — splitting a large capture into sheets is a way to stay under an engine's single-page limit.
 
 ## Spritesheet Postprocess
 

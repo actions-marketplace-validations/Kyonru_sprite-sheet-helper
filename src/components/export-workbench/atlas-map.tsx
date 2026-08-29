@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { addDataToImageIfNeeded } from "@/utils/images";
 import { useImagesStore } from "@/store/next/images";
+import type { ExportRow } from "@/types/file";
 import { getAtlasPageCoverage, type AtlasPlan } from "@/utils/atlas";
 
 /** Tallest the map may get inside the rail, in px. */
@@ -9,6 +10,13 @@ const MAX_MAP_HEIGHT = 168;
 
 type AtlasMapProps = {
   plan: AtlasPlan | null;
+  /**
+   * The rows the plan was packed from. Placements index into these, so a plan
+   * for one sheet must be drawn with that sheet's rows — indexing the whole
+   * capture list would draw another sheet's frames in this one's slots.
+   * Defaults to every captured sequence, which is the plan for a lone sheet.
+   */
+  rows?: ExportRow[];
   frameCount: number;
   sequenceCount: number;
   /**
@@ -38,13 +46,15 @@ function formatPercent(value: number) {
  */
 export function AtlasMap({
   plan,
+  rows: rowsProp,
   frameCount,
   sequenceCount,
   compact = false,
   maxHeight = MAX_MAP_HEIGHT,
   className,
 }: AtlasMapProps) {
-  const rows = useImagesStore((state) => state.images);
+  const capturedRows = useImagesStore((state) => state.images);
+  const rows = rowsProp ?? capturedRows;
   const page = plan?.pages[0] ?? null;
 
   const { placements, coverage, rowCount } = useMemo(() => {

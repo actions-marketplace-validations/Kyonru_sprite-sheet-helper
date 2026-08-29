@@ -542,10 +542,16 @@ whether it is a different one. Model: `{ title, short, detail, fix }`.
 ### 9.5 Connector continuity beats width
 See §6.8.
 
-### 9.6 The export dialog is not a settings screen
-By the time it opens, the rail has already reported the atlas state. It answers
-one question: *what exactly is about to be written, and where.* Format left (the
-only real choice), consequences right.
+### 9.6 The export dialog answers one question
+*What exactly is about to be written, and where.* Format left (the only real
+choice), consequences right.
+
+That includes the two things that decide what gets written — which sheet each
+sequence packs into, and how the packing runs. Both live here as well as in the
+rail, from the same components, because the dialog shows the map they change:
+the rule is not "no controls in the dialog", it is **no control without its
+consequence in view**. A setting you have to close the dialog to evaluate does
+not belong in it.
 
 **The atlas readout beside the map.** The map's width is its aspect ratio times
 its height cap, so it can never fill a `1fr` column — given one, it hugs the

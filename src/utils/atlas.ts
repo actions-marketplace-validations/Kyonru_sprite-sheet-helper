@@ -83,6 +83,12 @@ type MaxRectsPage = MutablePage & {
   freeRects: FreeRect[];
 };
 
+type PackAttempt = {
+  pages: MutablePage[];
+  /** The first frame that would not fit, when the bin was too small. */
+  failedFrame?: PendingFrame;
+};
+
 type MaxRectsCandidate = {
   page: MaxRectsPage;
   rect: FreeRect;
@@ -166,9 +172,13 @@ function createPage(index: number): MutablePage {
   };
 }
 
-function createMaxRectsPage(index: number, size: number): MaxRectsPage {
+function createMaxRectsPage(
+  index: number,
+  width: number,
+  height: number,
+): MaxRectsPage {
   const page = createPage(index) as MaxRectsPage;
-  page.freeRects = [{ x: 0, y: 0, w: size, h: size }];
+  page.freeRects = [{ x: 0, y: 0, w: width, h: height }];
   return page;
 }
 
@@ -259,6 +269,245 @@ function buildRowsPlan(rows: ExportRow[], options: AtlasOptions): AtlasPlan {
   return finishPlan(pages, options);
 }
 
+/**
+ * Frames laid out in shelves of a fixed width.
+ *
+ * Frames arrive sorted tallest-first, so each shelf is only as tall as its
+ * first frame and the waste under a shelf is small. For a sheet whose frames
+ * are all one size — the usual case here — this is simply a grid, and a grid is
+ * the optimum: the only waste is the remainder of the last row.
+ */
+function packShelves(
+  frames: PendingFrame[],
+  binWidth: number,
+  binHeight: number | null,
+  options: AtlasOptions,
+  allowNewPages: boolean,
+): PackAttempt {
+  const pages = [createPage(0)];
+  let page = pages[0];
+  let x = 0;
+  let y = 0;
+  let shelfHeight = 0;
+
+  for (const frame of frames) {
+    if (frame.slotW > binWidth) return { pages, failedFrame: frame };
+
+    if (x > 0 && x + frame.slotW > binWidth) {
+      x = 0;
+      y += shelfHeight;
+      shelfHeight = 0;
+    }
+
+    if (binHeight !== null && y + frame.slotH > binHeight) {
+      if (!allowNewPages) return { pages, failedFrame: frame };
+      page = createPage(pages.length);
+      pages.push(page);
+      x = 0;
+      y = 0;
+      shelfHeight = 0;
+    }
+
+    addPlacement(page, frame, x, y, options);
+    x += frame.slotW;
+    shelfHeight = Math.max(shelfHeight, frame.slotH);
+  }
+
+  return { pages };
+}
+
+/** Total pixels the pages of an attempt occupy, waste included. */
+function attemptArea(pages: MutablePage[]): number {
+  return pages.reduce((area, page) => area + page.width * page.height, 0);
+}
+
+/** The longest edge across an attempt's pages — how square the result is. */
+function attemptMaxDimension(pages: MutablePage[]): number {
+  return pages.reduce(
+    (longest, page) => Math.max(longest, page.width, page.height),
+    0,
+  );
+}
+
+/**
+ * How much larger than the smallest result a page may be and still be chosen
+ * for its shape.
+ *
+ * Minimising area alone picks strips: 160×704 and 320×352 hold the same frames
+ * in the same pixels, and the tall one wins on a tiebreak nobody asked for.
+ * Within a few percent the pixels are not the difference that matters, so the
+ * squarer page — the one an engine is happier to upload — takes it.
+ */
+const PACKED_SHAPE_TOLERANCE = 1.06;
+
+/** How many distinctly-shaped shelf results get the expensive MaxRects squeeze. */
+const SQUEEZED_WIDTH_COUNT = 6;
+
+/** How many frames contribute a side-by-side candidate width. */
+const PREFIX_WIDTH_COUNT = 32;
+
+/** Orders results smallest-first: fewest pages, least area, squarest. */
+function compareAttempts(a: MutablePage[], b: MutablePage[]): number {
+  return (
+    a.length - b.length ||
+    attemptArea(a) - attemptArea(b) ||
+    attemptMaxDimension(a) - attemptMaxDimension(b) ||
+    (a[0]?.width ?? 0) - (b[0]?.width ?? 0)
+  );
+}
+
+function isSmallerAttempt(next: MutablePage[], best: MutablePage[]): boolean {
+  return compareAttempts(next, best) < 0;
+}
+
+/**
+ * Pick the atlas to write from every layout the search found.
+ *
+ * Order of preference: fewer pages, then staying under the max atlas size —
+ * a page over it is a blocked export, so a roomier page that exports beats a
+ * tighter one that does not — then area, then shape.
+ */
+function choosePackedPages(
+  candidates: MutablePage[][],
+  options: AtlasOptions,
+): MutablePage[] | null {
+  const withinMax = candidates.filter((pages) =>
+    pages.every(
+      (page) =>
+        page.width <= options.maxAtlasSize &&
+        page.height <= options.maxAtlasSize,
+    ),
+  );
+  const pool = withinMax.length > 0 ? withinMax : candidates;
+  if (pool.length === 0) return null;
+
+  const smallest = pool.reduce((best, next) =>
+    isSmallerAttempt(next, best) ? next : best,
+  );
+  const budget = attemptArea(smallest) * PACKED_SHAPE_TOLERANCE;
+
+  return pool
+    .filter(
+      (pages) =>
+        pages.length === smallest.length && attemptArea(pages) <= budget,
+    )
+    .reduce((best, next) => {
+      const nextMax = attemptMaxDimension(next);
+      const bestMax = attemptMaxDimension(best);
+      if (nextMax !== bestMax) return nextMax < bestMax ? next : best;
+
+      const nextArea = attemptArea(next);
+      const bestArea = attemptArea(best);
+      if (nextArea !== bestArea) return nextArea < bestArea ? next : best;
+
+      // Never let iteration order decide.
+      return (next[0]?.width ?? 0) < (best[0]?.width ?? 0) ? next : best;
+    });
+}
+
+/**
+ * The page widths worth trying for a single-page atlas.
+ *
+ * The old search only ever tried squares, growing one by 25% until the frames
+ * fitted and stopping at the first size that did — which for 90 uniform frames
+ * settled on 704×704 at 74% coverage when 640×576 holds them exactly. So the
+ * width is searched instead of guessed: whole columns of the widest slot (the
+ * grid a uniform sheet wants), a sweep either side of the square, and the
+ * single-strip extreme.
+ */
+function candidatePackedWidths(frames: PendingFrame[]): number[] {
+  const maxSlotWidth = frames.reduce(
+    (widest, frame) => Math.max(widest, frame.slotW),
+    1,
+  );
+  const totalArea = frames.reduce(
+    (area, frame) => area + frame.slotW * frame.slotH,
+    0,
+  );
+  const totalWidth = frames.reduce((sum, frame) => sum + frame.slotW, 0);
+  const square = Math.max(maxSlotWidth, Math.ceil(Math.sqrt(totalArea)));
+  const widths = new Set<number>([maxSlotWidth, square, totalWidth]);
+
+  // Column counts, capped: past a few dozen columns the pages are all much the
+  // same shape, and every extra candidate is another pass over every frame.
+  const maxColumns = Math.min(frames.length, 64);
+  for (let columns = 1; columns <= maxColumns; columns += 1) {
+    widths.add(maxSlotWidth * columns);
+  }
+
+  // Sheets whose frames differ in size do not want a column grid, so sweep
+  // around the square as well.
+  for (const factor of [0.5, 0.65, 0.8, 0.9, 1.1, 1.25, 1.5, 2]) {
+    widths.add(Math.max(maxSlotWidth, Math.round(square * factor)));
+  }
+
+  // Widths where a shelf boundary falls naturally: the first k frames laid side
+  // by side. On a sheet of two sizes these are the only widths that hold a
+  // whole number of each, and a sweep of round numbers walks straight past them.
+  let prefix = 0;
+  for (const frame of frames.slice(0, PREFIX_WIDTH_COUNT)) {
+    prefix += frame.slotW;
+    widths.add(Math.max(maxSlotWidth, prefix));
+  }
+
+  return [...widths].sort((a, b) => a - b);
+}
+
+/**
+ * Squeeze a shelf result by re-packing it into shorter bins.
+ *
+ * MaxRects can slot a short frame under a tall one where a shelf cannot, but
+ * only when the bin leaves it no room to wander: given a bin far larger than
+ * the frames need, best-short-side-fit walks down the left edge and leaves an
+ * L-shaped hole. Handing it a bin that is already nearly full is what makes it
+ * useful — so it is used to shorten a known-good shelf layout rather than to
+ * find one, and the shelf result stands whenever it fails.
+ */
+function squeezeWithMaxRects(
+  frames: PendingFrame[],
+  width: number,
+  shelfPages: MutablePage[],
+  options: AtlasOptions,
+): MutablePage[] {
+  if (shelfPages.length !== 1) return shelfPages;
+
+  const totalArea = frames.reduce(
+    (area, frame) => area + frame.slotW * frame.slotH,
+    0,
+  );
+  const tallestSlot = frames.reduce(
+    (tallest, frame) => Math.max(tallest, frame.slotH),
+    1,
+  );
+
+  let best = shelfPages;
+  let low = Math.max(tallestSlot, Math.ceil(totalArea / width));
+  let high = shelfPages[0].height - 1;
+
+  // Around a dozen packs at most: the search halves the remaining height each
+  // time rather than trying every value between the two bounds.
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const attempt = packFramesIntoMaxRectsPages(
+      frames,
+      width,
+      mid,
+      options,
+      false,
+    );
+
+    if (attempt.failedFrame) {
+      low = mid + 1;
+      continue;
+    }
+
+    if (isSmallerAttempt(attempt.pages, best)) best = attempt.pages;
+    high = Math.min(mid, attempt.pages[0]?.height ?? mid) - 1;
+  }
+
+  return best;
+}
+
 function buildPackedPlan(rows: ExportRow[], options: AtlasOptions): AtlasPlan {
   const frames = flattenRows(rows, options).sort(
     (a, b) =>
@@ -273,88 +522,88 @@ function buildPackedPlan(rows: ExportRow[], options: AtlasOptions): AtlasPlan {
   }
 
   if (options.allowMultiPage) {
-    const result = packFramesIntoMaxRectsPages(
-      frames,
-      options,
+    const size = Math.max(
       options.maxAtlasSize,
+      ...frames.map((frame) => Math.max(frame.slotW, frame.slotH)),
+    );
+    const shelved = packShelves(frames, size, size, options, true);
+    const maxRects = packFramesIntoMaxRectsPages(
+      frames,
+      size,
+      size,
+      options,
       true,
     );
-    return finishPlan(result.pages, options);
+
+    const best =
+      !maxRects.failedFrame && isSmallerAttempt(maxRects.pages, shelved.pages)
+        ? maxRects.pages
+        : shelved.pages;
+
+    return finishPlan(best, options);
   }
 
-  let pageSize = getInitialPackedPageSize(frames);
-  for (let attempt = 0; attempt < frames.length + 16; attempt += 1) {
-    const result = packFramesIntoMaxRectsPages(
-      frames,
-      options,
-      pageSize,
-      false,
-    );
-
-    if (!result.failedFrame) {
-      return finishPlan(result.pages, options);
-    }
-
-    pageSize = Math.max(
-      pageSize + 1,
-      Math.ceil(pageSize * 1.25),
-      result.failedFrame.slotW,
-      result.failedFrame.slotH,
-    );
+  // Every candidate width is shelf-packed with no height limit, so every one of
+  // them fits — the search is over how good the result is, never over whether
+  // there is one.
+  const shelved: { width: number; pages: MutablePage[] }[] = [];
+  for (const width of candidatePackedWidths(frames)) {
+    const attempt = packShelves(frames, width, null, options, false);
+    if (attempt.failedFrame) continue;
+    shelved.push({ width, pages: attempt.pages });
   }
 
-  const fallbackSize = Math.max(
-    1,
-    frames.reduce((totalWidth, frame) => totalWidth + frame.slotW, 0),
-    ...frames.map((frame) => frame.slotH),
-  );
-  const fallback = packFramesIntoMaxRectsPages(
-    frames,
-    options,
-    fallbackSize,
-    false,
-  );
-  if (fallback.failedFrame) {
-    throw new Error("Unable to create a packed atlas plan.");
-  }
-  return finishPlan(fallback.pages, options);
-}
+  // Squeezing is the expensive half — a dozen MaxRects packs per width — so it
+  // only runs on the most promising widths. Deduplicated by the shape they
+  // produce first: a dozen widths can shelve into the identical page, and
+  // taking the best six by size alone spent all six on one shape and never
+  // tried the arrangement that actually squeezes smaller.
+  const seenShapes = new Set<string>();
+  const promising = [...shelved]
+    .sort((a, b) => compareAttempts(a.pages, b.pages))
+    .filter((entry) => {
+      const shape = entry.pages
+        .map((page) => `${page.width}x${page.height}`)
+        .join(",");
+      if (seenShapes.has(shape)) return false;
+      seenShapes.add(shape);
+      return true;
+    })
+    .slice(0, SQUEEZED_WIDTH_COUNT);
 
-function getInitialPackedPageSize(frames: PendingFrame[]): number {
-  const totalArea = frames.reduce(
-    (area, frame) => area + frame.slotW * frame.slotH,
-    0,
-  );
-  const maxDimension = Math.max(
-    1,
-    ...frames.flatMap((frame) => [frame.slotW, frame.slotH]),
-  );
+  const candidates = [
+    ...shelved.map((entry) => entry.pages),
+    ...promising.map((entry) =>
+      squeezeWithMaxRects(frames, entry.width, entry.pages, options),
+    ),
+  ];
 
-  return Math.max(maxDimension, Math.ceil(Math.sqrt(totalArea)));
+  const chosen = choosePackedPages(candidates, options);
+  if (!chosen) throw new Error("Unable to create a packed atlas plan.");
+
+  return finishPlan(chosen, options);
 }
 
 function packFramesIntoMaxRectsPages(
   frames: PendingFrame[],
+  binWidth: number,
+  binHeight: number,
   options: AtlasOptions,
-  pageSize: number,
   allowNewPages: boolean,
-): { pages: MaxRectsPage[]; failedFrame?: PendingFrame } {
-  const pages = [createMaxRectsPage(0, pageSize)];
+): PackAttempt {
+  const pages = [createMaxRectsPage(0, binWidth, binHeight)];
 
   for (const frame of frames) {
     let candidate = findBestMaxRectsCandidate(pages, frame);
 
     if (!candidate && allowNewPages) {
-      const nextPageSize = Math.max(
-        options.maxAtlasSize,
-        frame.slotW,
-        frame.slotH,
-      );
+      const nextWidth = Math.max(binWidth, frame.slotW);
+      const nextHeight = Math.max(binHeight, frame.slotH);
       const currentPage = pages[pages.length - 1];
       const nextPage =
         currentPage.placements.length === 0
-          ? createMaxRectsPage(currentPage.index, nextPageSize)
-          : createMaxRectsPage(pages.length, nextPageSize);
+          ? createMaxRectsPage(currentPage.index, nextWidth, nextHeight)
+          : createMaxRectsPage(pages.length, nextWidth, nextHeight);
       if (currentPage.placements.length === 0) {
         pages[pages.length - 1] = nextPage;
       } else {

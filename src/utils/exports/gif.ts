@@ -1,6 +1,7 @@
 import type { Exporter, ExportFile } from "@/types/file";
 import { createGif } from "../assets";
 import { captureIntervalFromFps, dedupeFileNames } from "./helpers";
+import { getRowSheetName, groupRowsBySheet } from "./sheets";
 
 /**
  * Delay between frames, in milliseconds, for one row.
@@ -24,9 +25,15 @@ export const gifExporter: Exporter<"gif"> = {
   label: "GIF (ZIP)",
 
   async run({ exportedImages, frameDelay }) {
+    // A GIF is per sequence, so a sheet is only a folder here — but it is the
+    // same grouping the atlas formats write, so the archive matches what those
+    // exports would have produced from the same sequences.
+    const multi = groupRowsBySheet(exportedImages).length > 1;
     // Two sequences may share a label; the files they write may not.
     const names = dedupeFileNames(
-      exportedImages.map((row) => `${row.label}.gif`),
+      exportedImages.map(
+        (row) => `${multi ? `${getRowSheetName(row)}/` : ""}${row.label}.gif`,
+      ),
     );
 
     const files: ExportFile[] = await Promise.all(

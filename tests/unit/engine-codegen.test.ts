@@ -72,7 +72,8 @@ const cases = [
   {
     engine: "raylib",
     generate: (j: SpritesheetJSON) => createRaylibH(j),
-    example: (j: SpritesheetJSON) => createRaylibExample(j),
+    example: (j: SpritesheetJSON) =>
+      createRaylibExample([{ base: "spritesheet", prefix: "", json: j }]),
     quad: (q: Quad) =>
       `{ ${q.x}.0f, ${q.y}.0f, ${q.w}.0f, ${q.h}.0f }`,
     fps: [/fps\s*=\s*8/, /fps\s*=\s*4/],

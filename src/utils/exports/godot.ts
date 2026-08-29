@@ -2,13 +2,20 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
+import { toSheetIdentifier } from "./sheets";
 
+/**
+ * `class_name` is global in Godot, so one class per sheet: a grouped export
+ * that reused `SpriteSheetHelper` would fail to parse the moment both scripts
+ * were in the project. A single sheet keeps the original name.
+ */
 export const createGodotGD = (
   json: SpritesheetJSON,
   imagePath = "spritesheet.png",
+  className = "SpriteSheetHelper",
 ): string => {
   const T = "\t"; // GDScript indents with tabs
   const lines: string[] = [];
@@ -22,14 +29,14 @@ export const createGodotGD = (
   lines.push(`# Usage:`);
   lines.push(`#   var animated_sprite := AnimatedSprite2D.new()`);
   lines.push(
-    `#   animated_sprite.sprite_frames = SpriteSheetHelper.create_sprite_frames()`,
+    `#   animated_sprite.sprite_frames = ${className}.create_sprite_frames()`,
   );
   lines.push(
     `#   animated_sprite.play("${json.animations[0]?.name ?? "walk"}")`,
   );
   lines.push(`#   add_child(animated_sprite)`);
   lines.push(``);
-  lines.push(`class_name SpriteSheetHelper`);
+  lines.push(`class_name ${className}`);
   lines.push(`extends RefCounted`);
   lines.push(``);
   lines.push(`const SHEET_PATH = "res://${imagePath}"`);
@@ -62,7 +69,10 @@ export const createGodotGD = (
   return lines.join("\n");
 };
 
-export const createGodotExample = (json: SpritesheetJSON): string => {
+export const createGodotExample = (
+  json: SpritesheetJSON,
+  className = "SpriteSheetHelper",
+): string => {
   const firstName = json.animations[0]?.name ?? "walk";
   return [
     `extends Node2D`,
@@ -71,7 +81,7 @@ export const createGodotExample = (json: SpritesheetJSON): string => {
     ``,
     `func _ready() -> void:`,
     `\tanimated_sprite = AnimatedSprite2D.new()`,
-    `\tanimated_sprite.sprite_frames = SpriteSheetHelper.create_sprite_frames()`,
+    `\tanimated_sprite.sprite_frames = ${className}.create_sprite_frames()`,
     `\tanimated_sprite.position = Vector2(160, 120)`,
     `\tadd_child(animated_sprite)`,
     `\tanimated_sprite.play("${firstName}")`,
@@ -86,24 +96,48 @@ export const godotExporter: Exporter<"godot"> = {
   id: "godot",
   label: "Godot (GDScript)",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions, spritePostprocess }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "godot",
       spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Godot");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "Godot");
+    }
+    const helperName = (sheet: (typeof sheets)[number]) =>
+      sheet.multi
+        ? `${toSheetIdentifier(sheet.base)}Helper`
+        : "SpriteSheetHelper";
 
     return {
       filename: "godot.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        manifestFile,
-        { name: "SpriteSheetHelper.gd", content: createGodotGD(json) },
-        { name: "ExamplePlayer.gd", content: createGodotExample(json) },
+        ...sheets.flatMap((sheet) => [
+          ...sheetImageFiles(sheet),
+          sheet.assets.manifestFile,
+          {
+            name: `${helperName(sheet)}.gd`,
+            content: createGodotGD(
+              sheet.assets.json,
+              sheet.imagePath,
+              helperName(sheet),
+            ),
+          },
+        ]),
+        {
+          name: "ExamplePlayer.gd",
+          content: createGodotExample(
+            sheets[0].assets.json,
+            helperName(sheets[0]),
+          ),
+        },
       ],
     };
   },

@@ -21,9 +21,16 @@ import {
   buildDirectionalAnimationGroups,
   getRowWorkflowMetadata,
 } from "../export-row-metadata";
+import {
+  DEFAULT_SHEET_NAME,
+  groupRowsBySheet,
+  type SheetGroup,
+} from "./sheets";
 
 type BuildSpritesheetAssetsOptions = {
   includeNormalMap?: boolean;
+  /** Name of the sheet being built. Defaults to the image's stem. */
+  sheetName?: string;
   atlasOptions?: Partial<AtlasOptions>;
   imageName?: string;
   normalImageName?: string;
@@ -57,6 +64,8 @@ export type SpritesheetManifest = {
   generatedBy: "sprite-sheet-helper";
   exportedAt: string;
   exporterId: ExportFormat;
+  /** The sheet this atlas is, so a multi-sheet export is self-describing. */
+  sheet: string;
   sourceFormat: "captured-frames";
   atlas: {
     layout: AtlasOptions["layout"];
@@ -158,12 +167,29 @@ function createTransparentFrame(width: number, height: number): string {
   return canvas.toDataURL("image/png").split("base64,")[1];
 }
 
+/** The file name without its directory or extension. */
+function fileStem(name: string): string {
+  const slash = name.lastIndexOf("/");
+  const base = slash === -1 ? name : name.slice(slash + 1);
+  const dot = base.lastIndexOf(".");
+  return dot === -1 ? base : base.slice(0, dot);
+}
+
+/**
+ * The manifest that travels with an atlas image.
+ *
+ * Named after the image rather than after the format, because an export can now
+ * write several atlases side by side: `hero.png` gets `hero.manifest.json`. A
+ * single default sheet still writes `spritesheet.manifest.json`, exactly as it
+ * always has.
+ */
 export function spritesheetManifestFileName(
   imageName = "spritesheet.png",
 ): string {
   const slash = imageName.lastIndexOf("/");
   const prefix = slash === -1 ? "" : imageName.slice(0, slash + 1);
-  return `${prefix}spritesheet.manifest.json`;
+
+  return `${prefix}${fileStem(imageName)}.manifest.json`;
 }
 
 export function createSpritesheetManifest({
@@ -173,6 +199,7 @@ export function createSpritesheetManifest({
   normalImageName,
   exporterId,
   exportedAt,
+  sheetName,
 }: {
   rows: ExportRow[];
   plan: AtlasPlan;
@@ -180,6 +207,7 @@ export function createSpritesheetManifest({
   normalImageName?: string;
   exporterId: ExportFormat;
   exportedAt: string;
+  sheetName?: string;
 }): SpritesheetManifest {
   const placementKey = (rowIndex: number, frameIndex: number) =>
     `${rowIndex}:${frameIndex}`;
@@ -197,6 +225,7 @@ export function createSpritesheetManifest({
     generatedBy: "sprite-sheet-helper",
     exportedAt,
     exporterId,
+    sheet: sheetName ?? fileStem(imageName),
     sourceFormat: "captured-frames",
     atlas: {
       ...plan.options,
@@ -278,8 +307,7 @@ export async function buildSpritesheetAssets(
 ): Promise<BuildSpritesheetAssetsResult> {
   const atlasOptions = normalizeAtlasOptions(options.atlasOptions);
   const imageName = options.imageName ?? "spritesheet.png";
-  const normalImageName =
-    options.normalImageName ?? "spritesheet_normal.png";
+  const normalImageName = options.normalImageName ?? "spritesheet_normal.png";
   const exporterId = options.exporterId ?? "spritesheet";
   const processedRows = await applySpritePostprocessRows(
     exportedImages,
@@ -346,6 +374,7 @@ export async function buildSpritesheetAssets(
     rows: processedRows,
     plan,
     imageName,
+    sheetName: options.sheetName,
     normalImageName: hasNormalImages ? normalImageName : undefined,
     exporterId,
     exportedAt: json.meta.exportedAt,
@@ -368,6 +397,66 @@ export async function buildSpritesheetAssets(
   };
 }
 
+/**
+ * One sheet's worth of built assets, plus the paths its files were named with.
+ */
+export type SheetAssets = SheetGroup & {
+  imagePath: string;
+  normalImagePath: string;
+  assets: BuildSpritesheetAssetsResult;
+  /** Whether this export writes more than one sheet. */
+  multi: boolean;
+};
+
+/**
+ * Pack and render every sheet in an export.
+ *
+ * Each sheet is an independent atlas: its own packing, its own pages, its own
+ * manifest, named after the sheet. Exporters map over the result instead of
+ * building one atlas, which is the whole of what grouping costs them — the
+ * generated code for a single sheet is unchanged, because a lone default sheet
+ * still produces `spritesheet.png` and friends.
+ */
+export async function buildSheetAssets(
+  exportedImages: ExportRow[],
+  options: BuildSpritesheetAssetsOptions & {
+    /** Directory every file for this exporter lives in, e.g. `assets/`. */
+    directory?: string;
+  } = {},
+): Promise<SheetAssets[]> {
+  const groups = groupRowsBySheet(exportedImages);
+  // An export with no rows still has one (empty) sheet: exporters that render
+  // it produce the same empty atlas they did before grouping existed, rather
+  // than a zip with no atlas in it at all.
+  const sheets =
+    groups.length > 0
+      ? groups
+      : [{ name: DEFAULT_SHEET_NAME, base: DEFAULT_SHEET_NAME, rows: [] }];
+  const directory = options.directory ?? "";
+  const multi = sheets.length > 1;
+  const built: SheetAssets[] = [];
+
+  for (const sheet of sheets) {
+    const imagePath = `${directory}${sheet.base}.png`;
+    const normalImagePath = `${directory}${sheet.base}_normal.png`;
+
+    built.push({
+      ...sheet,
+      imagePath,
+      normalImagePath,
+      multi,
+      assets: await buildSpritesheetAssets(sheet.rows, {
+        ...options,
+        sheetName: sheet.name,
+        imageName: imagePath,
+        normalImageName: normalImagePath,
+      }),
+    });
+  }
+
+  return built;
+}
+
 export function createNormalMapFile(
   normalBase64PNG: string | undefined,
   name = "spritesheet_normal.png",
@@ -375,6 +464,18 @@ export function createNormalMapFile(
   return normalBase64PNG
     ? [{ name, content: normalBase64PNG, base64: true }]
     : [];
+}
+
+/**
+ * The image files one sheet writes: its atlas page, and its normal map when the
+ * export has one. Every engine exporter starts its file list with these, then
+ * adds the manifest and its own generated code in whatever order it writes.
+ */
+export function sheetImageFiles(sheet: SheetAssets): ExportFile[] {
+  return [
+    { name: sheet.imagePath, content: sheet.assets.base64PNG, base64: true },
+    ...createNormalMapFile(sheet.assets.normalBase64PNG, sheet.normalImagePath),
+  ];
 }
 
 export function assertSinglePageAtlas(

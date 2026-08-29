@@ -39,6 +39,8 @@ interface ImagesActions extends SnapshotEnabledStore<ImagesState> {
   updateWidth: (uuid: string, width: number) => void;
   updateHeight: (uuid: string, height: number) => void;
   updateFps: (uuid: string, fps: number) => void;
+  /** Assign a sequence to a sheet. An empty name puts it back on the default. */
+  updateSheet: (uuid: string, sheet: string) => void;
   setSelectedRow: (index: number) => void;
   addImageToRow: (
     index: number,
@@ -159,6 +161,22 @@ export const useImagesStore = create<ImagesStore>()(
           images: state.images.map((row) =>
             row.uuid === uuid ? { ...row, fps } : row,
           ),
+        })),
+
+      updateSheet: (uuid, sheet) =>
+        set((state) => ({
+          images: state.images.map((row) => {
+            if (row.uuid !== uuid) return row;
+            const name = sheet.trim();
+            // Dropped rather than stored empty: absent is the default sheet,
+            // and a row carrying "" would sort into a sheet with no name.
+            if (!name) {
+              const rest = { ...row };
+              delete rest.sheet;
+              return rest;
+            }
+            return { ...row, sheet: name };
+          }),
         })),
 
       setSelectedRow: (index) => set({ selectedRow: index }),

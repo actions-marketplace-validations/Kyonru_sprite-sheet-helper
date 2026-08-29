@@ -2,8 +2,9 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
+  type SheetAssets,
 } from "./helpers";
 
 export const createVanillaLua = (
@@ -137,10 +138,20 @@ export const createAnim8Lua = (
   return lines.join("\n");
 };
 
-export const createLuaExample = (json: SpritesheetJSON): string => {
+/**
+ * A `main.lua` that drives the first sheet.
+ *
+ * One example, not one per sheet: the point is to show the module's shape, and
+ * every sheet's module has the same one. It requires that sheet by name, so a
+ * grouped export still runs as written.
+ */
+export const createLuaExample = (
+  json: SpritesheetJSON,
+  moduleName = "spritesheet",
+): string => {
   const firstName = json.animations[0]?.name ?? "walk";
   return [
-    `local spritesheet = require("spritesheet")`,
+    `local spritesheet = require("${moduleName}")`,
     ``,
     `local sheet`,
     ``,
@@ -162,25 +173,40 @@ export const love2dVanillaExporter: Exporter<"love2d-lua"> = {
   id: "love2d-lua",
   label: "Love2D (Lua)",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions, spritePostprocess }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "love2d-lua",
       spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Love2D (Lua)");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets)
+      assertSinglePageAtlas(sheet.assets, "Love2D (Lua)");
 
     return {
       filename: "lua.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        { name: "spritesheet.json", content: JSON.stringify(json, null, 2) },
-        manifestFile,
-        { name: "spritesheet.lua", content: createVanillaLua(json) },
-        { name: "main.lua", content: createLuaExample(json) },
+        ...sheets.flatMap((sheet: SheetAssets) => [
+          ...sheetImageFiles(sheet),
+          {
+            name: `${sheet.base}.json`,
+            content: JSON.stringify(sheet.assets.json, null, 2),
+          },
+          sheet.assets.manifestFile,
+          {
+            name: `${sheet.base}.lua`,
+            content: createVanillaLua(sheet.assets.json, sheet.imagePath),
+          },
+        ]),
+        {
+          name: "main.lua",
+          content: createLuaExample(sheets[0].assets.json, sheets[0].base),
+        },
       ],
     };
   },
@@ -190,25 +216,40 @@ export const love2dAnim8Exporter: Exporter<"love2d-anim8"> = {
   id: "love2d-anim8",
   label: "Love2D (Anim8)",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions, spritePostprocess }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "love2d-anim8",
       spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Love2D (Anim8)");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets)
+      assertSinglePageAtlas(sheet.assets, "Love2D (Anim8)");
 
     return {
       filename: "anim8.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        { name: "spritesheet.json", content: JSON.stringify(json, null, 2) },
-        manifestFile,
-        { name: "spritesheet.lua", content: createAnim8Lua(json) },
-        { name: "main.lua", content: createLuaExample(json) },
+        ...sheets.flatMap((sheet: SheetAssets) => [
+          ...sheetImageFiles(sheet),
+          {
+            name: `${sheet.base}.json`,
+            content: JSON.stringify(sheet.assets.json, null, 2),
+          },
+          sheet.assets.manifestFile,
+          {
+            name: `${sheet.base}.lua`,
+            content: createAnim8Lua(sheet.assets.json, sheet.imagePath),
+          },
+        ]),
+        {
+          name: "main.lua",
+          content: createLuaExample(sheets[0].assets.json, sheets[0].base),
+        },
       ],
     };
   },

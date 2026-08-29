@@ -2,13 +2,20 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
+import { toSheetIdentifier } from "./sheets";
 
+/**
+ * A C# class name is unique per assembly, so each sheet gets its own component:
+ * two sheets both called `SpriteSheetAnimator` would not compile together. A
+ * single sheet keeps the original name.
+ */
 export const createUnityCS = (
   json: SpritesheetJSON,
   imagePath = "spritesheet.png",
+  className = "SpriteSheetAnimator",
 ): string => {
   // Resources.Load omits the extension
   const resourceName = imagePath.replace(/\.[^/.]+$/, "");
@@ -19,7 +26,7 @@ export const createUnityCS = (
   lines.push(`//`);
   lines.push(`// 1. Place "${imagePath}" inside Assets/Resources/.`);
   lines.push(
-    `// 2. Attach SpriteSheetAnimator to a GameObject that has a SpriteRenderer.`,
+    `// 2. Attach ${className} to a GameObject that has a SpriteRenderer.`,
   );
   lines.push(
     `// 3. Call animator.Play("${json.animations[0]?.name ?? "walk"}") to start an animation.`,
@@ -28,7 +35,7 @@ export const createUnityCS = (
   lines.push(`using System.Collections.Generic;`);
   lines.push(`using UnityEngine;`);
   lines.push(``);
-  lines.push(`public class SpriteSheetAnimator : MonoBehaviour`);
+  lines.push(`public class ${className} : MonoBehaviour`);
   lines.push(`{`);
   lines.push(`    private struct FrameRect`);
   lines.push(`    {`);
@@ -144,21 +151,24 @@ export const createUnityCS = (
   return lines.join("\n");
 };
 
-export const createUnityExample = (json: SpritesheetJSON): string => {
+export const createUnityExample = (
+  json: SpritesheetJSON,
+  className = "SpriteSheetAnimator",
+): string => {
   const [first, second] = json.animations.map((a) => a.name);
   const hasTwo = !!second;
 
   return [
     `using UnityEngine;`,
     ``,
-    `// Attach this alongside SpriteSheetAnimator on the same GameObject.`,
+    `// Attach this alongside ${className} on the same GameObject.`,
     `public class ExamplePlayer : MonoBehaviour`,
     `{`,
-    `    private SpriteSheetAnimator _animator;`,
+    `    private ${className} _animator;`,
     ``,
     `    private void Start()`,
     `    {`,
-    `        _animator = GetComponent<SpriteSheetAnimator>();`,
+    `        _animator = GetComponent<${className}>();`,
     `        _animator.Play("${first ?? "walk"}");`,
     `    }`,
     ``,
@@ -181,24 +191,48 @@ export const unityExporter: Exporter<"unity"> = {
   id: "unity",
   label: "Unity (C#)",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions, spritePostprocess }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "unity",
       spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Unity");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "Unity");
+    }
+    const animatorName = (sheet: (typeof sheets)[number]) =>
+      sheet.multi
+        ? `${toSheetIdentifier(sheet.base)}Animator`
+        : "SpriteSheetAnimator";
 
     return {
       filename: "unity.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        manifestFile,
-        { name: "SpriteSheetAnimator.cs", content: createUnityCS(json) },
-        { name: "ExamplePlayer.cs", content: createUnityExample(json) },
+        ...sheets.flatMap((sheet) => [
+          ...sheetImageFiles(sheet),
+          sheet.assets.manifestFile,
+          {
+            name: `${animatorName(sheet)}.cs`,
+            content: createUnityCS(
+              sheet.assets.json,
+              sheet.imagePath,
+              animatorName(sheet),
+            ),
+          },
+        ]),
+        {
+          name: "ExamplePlayer.cs",
+          content: createUnityExample(
+            sheets[0].assets.json,
+            animatorName(sheets[0]),
+          ),
+        },
       ],
     };
   },

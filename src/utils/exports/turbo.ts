@@ -2,8 +2,8 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
 
 export const createTurboRust = (
@@ -110,7 +110,10 @@ export const createTurboRust = (
   return lines.join("\n");
 };
 
-export const createTurboExample = (json: SpritesheetJSON): string => {
+export const createTurboExample = (
+  json: SpritesheetJSON,
+  moduleName = "spritesheet_turbo",
+): string => {
   const firstName = json.animations[0]?.name ?? "walk";
   const fnName = firstName
     .replace(/[^a-zA-Z0-9_]/g, "_")
@@ -118,7 +121,7 @@ export const createTurboExample = (json: SpritesheetJSON): string => {
     .toLowerCase();
 
   return [
-    `use crate::spritesheet_turbo::*;`,
+    `use crate::${moduleName}::*;`,
     ``,
     `turbo::go! {`,
     `    let mut player = ${fnName}();`,
@@ -136,25 +139,47 @@ export const turboRustExporter: Exporter<"turbo"> = {
   id: "turbo",
   label: "Turbo (Rust)",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions, spritePostprocess }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "turbo",
       spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Turbo");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "Turbo");
+    }
+    // Each sheet is its own Rust module, so the types inside them may keep
+    // their names — `mod` is the namespace.
+    const moduleName = (base: string) => `${base}_turbo`;
 
     return {
       filename: "turbo.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        { name: "spritesheet.json", content: JSON.stringify(json, null, 2) },
-        manifestFile,
-        { name: "spritesheet_turbo.rs", content: createTurboRust(json) },
-        { name: "example.rs", content: createTurboExample(json) },
+        ...sheets.flatMap((sheet) => [
+          ...sheetImageFiles(sheet),
+          {
+            name: `${sheet.base}.json`,
+            content: JSON.stringify(sheet.assets.json, null, 2),
+          },
+          sheet.assets.manifestFile,
+          {
+            name: `${moduleName(sheet.base)}.rs`,
+            content: createTurboRust(sheet.assets.json, sheet.imagePath),
+          },
+        ]),
+        {
+          name: "example.rs",
+          content: createTurboExample(
+            sheets[0].assets.json,
+            moduleName(sheets[0].base),
+          ),
+        },
       ],
     };
   },
