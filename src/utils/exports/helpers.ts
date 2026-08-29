@@ -216,7 +216,9 @@ export function createSpritesheetManifest({
 
       return {
         name: row.label,
-        fps: row.fps ?? 12,
+        // Not `?? 12`: a row can legitimately carry 0 from an older
+        // project, and zero is not nullish, so it used to reach the manifest.
+        fps: Number.isFinite(row.fps) && row.fps > 0 ? row.fps : 12,
         frameWidth: Math.max(
           1,
           Math.round(row.frameWidth * plan.options.scale),
@@ -383,4 +385,64 @@ export function assertSinglePageAtlas(
   throw new Error(
     `${label} does not support multi-page atlases yet. Increase max atlas size, disable multi-page, or export the generic spritesheet format.`,
   );
+}
+
+/**
+ * Make a list of output file names unique.
+ *
+ * Sequences are free to share a label — two rows both called "Animation" is
+ * normal — but the files they produce are not. Left alone, the second
+ * `Animation.gif` silently overwrites the first inside the archive, so an
+ * export of two sequences yields one file and no error.
+ *
+ * Collisions get a numeric suffix before the extension: `Animation.gif`,
+ * `Animation-2.gif`. The first occurrence keeps its plain name so the common
+ * case is unchanged.
+ */
+export function dedupeFileNames(names: string[]): string[] {
+  const seen = new Map<string, number>();
+
+  return names.map((name) => {
+    const count = seen.get(name) ?? 0;
+    seen.set(name, count + 1);
+    if (count === 0) return name;
+
+    const slash = name.lastIndexOf("/");
+    const dir = slash === -1 ? "" : name.slice(0, slash + 1);
+    const base = slash === -1 ? name : name.slice(slash + 1);
+    const dot = base.indexOf(".");
+    const stem = dot === -1 ? base : base.slice(0, dot);
+    const ext = dot === -1 ? "" : base.slice(dot);
+
+    return `${dir}${stem}-${count + 1}${ext}`;
+  });
+}
+
+/**
+ * Frames per second for a capture interval in milliseconds.
+ *
+ * Rounding to a whole number loses the interval badly at the slow end: a 700ms
+ * interval rounds to 1fps and plays back at 1000ms, and anything past 2000ms
+ * rounds to **0**, which reaches the exported manifest as `fps: 0` — a value no
+ * consumer can use, and one that `?? 12` does not catch because zero is not
+ * nullish.
+ *
+ * Six decimals round-trips every interval the UI allows to well under a
+ * millisecond, without emitting a seventeen-digit float into someone's asset
+ * pipeline. Whole-number rates stay whole: 100ms is still exactly 10. Three
+ * decimals was not enough — a 3000ms interval came back as 3003ms.
+ */
+export function fpsFromCaptureInterval(intervalMs: number): number {
+  const interval =
+    Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 100;
+  return Math.round((1000 / interval) * 1e6) / 1e6;
+}
+
+/**
+ * Playback interval in milliseconds for a row's frame rate, for previews.
+ * Falls back to 12fps when a row carries no usable rate.
+ */
+export function captureIntervalFromFps(fps: number | undefined): number {
+  const rate = Number.isFinite(fps) && (fps ?? 0) > 0 ? (fps as number) : 12;
+  return 1000 / rate;
 }

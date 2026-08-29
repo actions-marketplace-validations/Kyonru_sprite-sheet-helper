@@ -102,12 +102,15 @@ export async function runWebUiWorkflowExport({
       await page.waitForSelector('[data-testid="prepare-export-button"]:not([disabled])', {
         timeout: 60000,
       });
+      // Packing options live in the rail's Pack stage, beside the atlas map
+      // they change, so they are configured before the dialog is opened — the
+      // dialog confirms what will be written rather than configuring it.
+      await configureAtlasThroughUi(page);
       await clickElement(page, '[data-testid="prepare-export-button"]');
       await pauseForVisibleE2EStep("Export preflight opened");
       await page.waitForSelector('[data-testid="preflight-export-button"]', {
         timeout: 60000,
       });
-      await configureAtlasThroughUi(page);
       await page.waitForSelector('[data-testid="export-format-love2d-lua"]', {
         timeout: 60000,
       });

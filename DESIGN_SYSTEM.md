@@ -1,6 +1,6 @@
 # Design System — sprite-sheet-helper
 
-Status: **direction agreed, implementation not started.**
+Status: **implemented.** Steps 1–10 of §10.2 are done; §11 lists what is still open.
 Last updated: 2026-08-28.
 
 This document exists so that any agent or contributor can continue the design
@@ -19,10 +19,16 @@ before changing anything visual.
 | Wondering why something looks the way it does | §9 |
 | Looking for what is still undecided | §11 |
 
-**The reference implementation is `src/__design_lab/VariantN.tsx` and
-`VariantNModal.tsx`** (temporary; see §10.0). They are pixel-accurate mocks
-built on fixture data, with hardcoded hex values. Production code must go
-through CSS tokens (§3) — do not copy the hex literals across.
+The system is live in the app. Tokens are in `src/index.css`; the primitives
+are `panel-tile.tsx`, `panel-header.tsx`, `panel-empty.tsx`, `panel-tabs.tsx`,
+`ui/scrub-field.tsx` and `export-workbench/pipeline.tsx`.
+
+**The design lab is kept**, at `src/__design_lab/` — dev-only, stripped from
+production builds. Open `?design_lab=true` to compare the implementation against
+variant N and the directions that lost. Use it as the reference when adding a
+surface: if the app and N disagree on layout, N is the intent.
+
+**Never hardcode a colour.** Everything routes through the tokens in §3.
 
 ---
 
@@ -88,14 +94,20 @@ The chosen direction, **N**, is a synthesis of six:
 
 ## 3. Tokens
 
-### 3.1 Current state vs. proposed
+### 3.1 One hue
 
-The repo already ships a palette (commit `5697e82`, "Graphite Instrument") in
-`src/index.css` at **hue 265**. N proposes moving surfaces to **hue 248** — the
-hue already used by `--ring` and `--sidebar-primary`. The change unifies
-surfaces and accent onto one hue instead of two.
+Surfaces and accent share **hue 248** — the steel already used by `--ring`.
+Applied in both themes.
 
-This is a small, mechanical change. **It has not been applied yet.**
+**Naming, important:** the brand accent is `--brand`, *not* `--accent`. shadcn
+reserves `--accent` / `--accent-foreground` for the neutral hover pair used by
+menus and dropdowns; redefining it would turn every dropdown hover blue. The
+two are separate on purpose:
+
+| Token | Meaning |
+|---|---|
+| `--brand` | Selection, focus, active state, primary action. The one accent. |
+| `--accent` | shadcn's neutral hover fill. Stays neutral. Do not repurpose. |
 
 ### 3.2 Dark surface ladder (authoritative)
 
@@ -148,10 +160,24 @@ Never hardcode; these are the only overlays in the system.
 | `--warn-line` | `rgb(224 176 98 / 0.26)` | Warning surface border |
 | `--row-hover` | `rgb(255 255 255 / 0.05)` | Row hover |
 
-### 3.6 Light theme — **NOT YET DESIGNED**
+### 3.6 Light theme
 
-N is dark-only. Light mode currently ships the committed hue-265 palette and
-will look inconsistent with any N work. See §11.
+Derived and shipped. The ladder keeps the same ordering in both themes —
+`sunken < background < card < high < highest` — and only the direction of
+"further from the ground" flips.
+
+| Role | Light | Dark |
+|---|---|---|
+| `--surface-sunken` | `oklch(0.902 0.004 248)` | `oklch(0.191 0.003 248)` |
+| `--background` | `oklch(0.935 0.003 248)` | `oklch(0.208 0.003 248)` |
+| `--card` | `oklch(0.972 0.002 248)` | `oklch(0.242 0.005 248)` |
+| `--surface-high` | `oklch(0.99 0.002 248)` | `oklch(0.276 0.006 248)` |
+| `--surface-highest` | `oklch(0.999 0.001 248)` | `oklch(0.315 0.007 248)` |
+| `--brand` | `oklch(0.52 0.115 248)` | `oklch(0.704 0.1 251)` |
+| `--faint-foreground` | `oklch(0.545 0.014 248)` | `oklch(0.62 0.013 248)` |
+
+Strokes flip base too: white-alpha in dark, ink-alpha in light. The 3D viewport
+stays dark in both themes — it is the artwork, not chrome.
 
 ---
 
@@ -188,7 +214,7 @@ re-implementing.
 | Tile | 10px |
 | Control (input, button, chip, tab) | 5px |
 | Row (hover/selection) | 4px |
-| Menu / popover | 8px |
+| Menu / popover | 10px (tile radius — overlays are tiles, not controls) |
 | Dialog | 12px |
 | Atlas map, preview frame | 6px |
 
@@ -303,8 +329,14 @@ stage stays reachable, because the workflow is loopy (people re-record after
 seeing the atlas).
 
 Order is **Scene → Capture → Effects → Pack → Export**, and each stage depends
-only on those above it. Capture owns interval, frame size and safe margin,
-because editing them invalidates everything downstream.
+only on those above it.
+
+- **Capture** owns interval, frame size and safe margin — editing them
+  invalidates everything downstream.
+- **Pack** owns layout, padding, extrude, sprite margin, max size, scale and
+  multi-page. They sit directly under the atlas map, so changing one re-packs
+  the page in view. They used to live in the export dialog, which meant opening
+  a modal to change how packing works and closing it to see the result.
 
 Structure — a **two-column grid, always**:
 
@@ -315,12 +347,27 @@ Structure — a **two-column grid, always**:
 - Marker: 14px circle, 1px border in the state colour
 - Connector: 1px `--stroke`, `flex: 1` below the marker
 
-| State | Glyph | Colour |
+| State | Mark | Colour |
 |---|---|---|
-| done | ✓ | `--ok` |
-| active | ● | `--accent` (+ `--accent-soft` fill) |
-| warn | ! | `--warn` |
-| todo | ○ | `--faint-foreground` |
+| done | Check glyph, 9px | `--ok` |
+| active | **CSS disc, 6px** | `--brand` (+ `--brand-soft` fill) |
+| warn / blocked | Alert glyph, 9px | `--warn` / `--destructive` |
+| todo | **nothing — the ring is the empty state** | `--faint-foreground` |
+
+Two of these are deliberately *not* icons. Lucide's `Dot` centres its circle at
+`(12.1, 12.1)` in a 24-unit box rather than `(12, 12)`, and needs
+`stroke-width: 8` to register at 14px — which renders a blob that is both
+off-centre and wider than the ring containing it. A CSS disc is centred exactly
+by the grid and costs nothing. `todo` draws no glyph at all: the ring already
+*is* the empty state, and an inner circle only doubled it.
+
+### 6.8b Atlas map
+
+The map draws **the real captured frames**, not solid blocks. A grid of blocks
+tells you the packing worked; the frames tell you whether it packed the right
+thing — a wrong sequence or an empty capture is visible here and nowhere else
+before export. Frames sit on the `.checkerboard` utility, so transparency reads
+as transparency.
 
 **Content must never span into the marker column.** Doing so breaks the
 connector, so the one stage with a problem is also the one that looks detached
@@ -351,6 +398,18 @@ inline fix action.
 
 One primary action per surface.
 
+### 6.10b Writes tree
+
+What an export is about to write, rendered as a tree rather than a flat list of
+full paths. Exporters emit real structure — `assets/spritesheet.png` beside
+`src/main.rs` and a bare `Cargo.toml.snippet` — and a flat list makes the reader
+parse that structure one row at a time. Files at the archive root sit flush;
+nested files hang off a guide line under a folder row.
+
+**Never key these rows by filename.** Two sequences may share a label, so two
+rows can carry the same path; a filename key collides in reconciliation and
+stale rows survive a format switch. See §12.6.
+
 ### 6.11 Format mark (export dialog)
 
 **Brand logos and our own icons get different substrates, deliberately.**
@@ -367,38 +426,77 @@ Logos live in `public/`. See §12 for a bug in the current mapping.
 
 ## 7. Layout
 
+**Tiles on a ground, not panes sharing borders.** The shell paints
+`--background`, pads 8px, and lays six tiles on it with 8px gutters. Every tile
+carries its own hairline and sits a step up the ladder. Resize handles are the
+gutters — transparent, revealing a grip only on hover.
+
 ```
-┌─ top bar (34px) ─────────────────────────────────────────────┐
+┌─ top bar ────────────────────────────────────────────────────┐
 ├──────────────┬─────────────────────────────┬─────────────────┤
-│ Scene tile   │  Scene view                 │ Export pipeline │
-│ (grows)      │  └ Camera PiP (draggable)   │ tile (grows)    │
-│              │                             │                 │
-│ Inspector    ├─────────────────────────────┤ Action tile     │
-│ tile (auto)  │  Sequence tile (auto)       │ (auto)          │
+│ Scene tile   │  Scene view tile            │ Export pipeline │
+│              │  └ Preview PiP (draggable)  │ tile            │
+├──────────────┤                             │                 │
+│ Inspector    ├─────────────────────────────┤                 │
+│ tile         │  Sequence tile              ├─────────────────┤
+│              │  (hidden until recorded)    │ Action tile     │
 └──────────────┴─────────────────────────────┴─────────────────┘
 ```
 
-Columns: `202px | 1fr | 250px`, 8px gutters, 8px shell padding.
+Columns: `20% | 1fr | 20%`, all resizable.
+
+### The sequence belongs to the centre column
+
+It is a **viewing** surface — you watch it, the way you watch the scene view
+and the camera preview. Putting it in the export rail made the rail scroll past
+the thing you were trying to look at. The rail beside it is for deciding.
+
+It collapses to nothing until something has been recorded, so an empty project
+gives the whole column to the viewport.
 
 ### The three views — keep these distinct
 
 This was got wrong once. They are three different things:
 
-1. **Scene view** — where objects are *moved*. Keeps the grid and the translate
-   gizmo. This is the editing surface.
-2. **Camera** — what the render camera sees, i.e. exactly what will be
-   captured. A draggable PiP nested in the scene view, labelled with the capture
-   size. The camera panel *is* the capture bounds — do not also draw bounds in
-   the scene view.
-3. **Sequence** — playback of already-recorded frames. Carries the transport:
-   sequence chips, loop toggle, ‹ / › frame stepping flanking the frame, scrubber,
-   and *two* edit scopes ("Edit frame N" and "Edit sequence") so the target is
-   never ambiguous.
+1. **Scene view** — where objects are *moved*. Keeps the grid and gizmos. The
+   editing surface.
+2. **Preview (camera)** — what the render camera sees, i.e. exactly what will be
+   captured. A draggable panel nested in the scene view, clamped to it. The
+   camera panel *is* the capture bounds — do not also draw bounds in the scene
+   view.
+3. **Sequence** — playback of already-recorded frames. Height is the scarce
+   dimension under the viewport, so the panel is one header row and one
+   transport row:
+
+   ```
+   SEQUENCE  [idle 6][walk 5][attack 3]            [⟲ Loop]   4 / 6
+   ‹  [frame ⁴]  ›    ▷ ▬▬▬▬▬▬
+                      [✎ Edit frame 4] [◈ Edit sequence]
+   ```
+
+   - Sequences are **chips, not a stacked list** — picking one to watch is a
+     single click, and a list of expandable rows spends height on editing that
+     most of the time nobody is doing.
+   - The steppers flank **the frame**, not the strip: you are moving through
+     frames, so it reads as a carousel rather than a scrolling list.
+   - The scrubber is **the frames themselves**, not an abstract bar. These are
+     exactly what gets written into the spritesheet, in the order it will write
+     them, so the strip doubles as the export's contents and as the timeline you
+     scrub. Click any frame to jump to it.
+   - While playing, the active frame is kept **centred** in the strip
+     (`scrollIntoView({ inline: "center" })`). `nearest` parks it at whichever
+     edge it entered from, which reads as the playhead drifting. Frames at
+     either end sit off-centre by design — centring them would scroll past the
+     content edge.
+   - The frame tile zooms on wheel, pans on drag and resets on double-click.
+     The pointer is the control, so the tile stays a frame instead of becoming
+     a toolbar.
+   - **Two edit scopes**, so the target is never ambiguous: `Edit frame N`
+     names the frame beside it and opens the frame manager; `Edit sequence`
+     reveals rename, frame size and delete for the chip selected above.
 
 **Do not put scene-view information (model name, frame counter) in the preview.**
 It reads as clutter because it belongs to a different surface.
-
----
 
 ## 8. Interaction
 
@@ -449,6 +547,16 @@ By the time it opens, the rail has already reported the atlas state. It answers
 one question: *what exactly is about to be written, and where.* Format left (the
 only real choice), consequences right.
 
+**The atlas readout beside the map.** The map's width is its aspect ratio times
+its height cap, so it can never fill a `1fr` column — given one, it hugs the
+left edge and leaves the numbers stranded at the far right. The map takes
+exactly its own width; the readout takes the rest, capped (`max-w-md`) so a
+10:1 atlas that fills the row and pushes the readout onto its own line does not
+fling labels to opposite edges of the dialog. Inside it, every fact is a
+micro-label with its value directly underneath — never a label column and a
+value column, whose gap changes width with the atlas. The coverage bar is the
+one element that stretches, because stretching is what a bar is for.
+
 ---
 
 ## 10. Implementation plan
@@ -463,7 +571,7 @@ The design lab is temporary and must not ship.
 
 Extract anything worth keeping first — the mocks are the reference for §6.
 
-### 10.1 Already landed (commit `5697e82`)
+### 10.1 Landed earlier (commit `5697e82`)
 
 - `PanelHeader`, `PanelEmpty`, `PanelTabs` primitives + adoption
 - Consolidation of three duplicate `PanelHeader` implementations
@@ -491,6 +599,21 @@ Extract anything worth keeping first — the mocks are the reference for §6.
 9. **Camera PiP** — extract from the floating "Preview Canvas"; make it
    draggable and clamped.
 10. **Export dialog** — §9.6, §6.11.
+
+### 10.2b What each step actually produced
+
+| # | Outcome |
+|---|---|
+| 1 | Both themes reseeded to hue 248; surface/alpha/semantic tokens added; radius scale mapped to roles (sm 4 / md 5 / lg 10 / xl 12), which lands the geometry without editing each shadcn primitive. |
+| 2 | Elevation shadows stripped from every `ui/` primitive. Overlay surfaces keep a stroke and sit a step up the ladder instead. |
+| 3 | `panels/panel-tile.tsx`. |
+| 4 | `ui/scrub-field.tsx`, wired into the inspector's `number` and `vector3` fields. **The separate slider under bounded number fields is gone** — the field's own fill bar replaces it, so one control reports the value instead of two describing it. |
+| 5 | Tree rows to 22px/11px; react-complex-tree vars now read from the token ladder instead of their own hex palette; type icons take the accent on the selected row. |
+| 6 | Export rail rebuilt as the pipeline. Sequences moved inside Capture, which is the step that produces them. |
+| 7 | `ExportValidationMessage` gained `stage`, `detail` and `fix`. Messages are routed to the stage that owns them; the footer shows only unstaged ones, so nothing is reported twice. |
+| 8 | Sequence transport unwrapped from its own collapsible — it sits inside the Capture stage, which already names it. |
+| 9 | The Preview Canvas was *already* draggable and clamped; what it needed was the surface language. See §12.2–12.4 for three real defects found there. |
+| 10 | Export dialog: brand-token selection, format marks per §6.11, and `ValidationNote` with full detail. |
 
 ### 10.3 Verification
 
@@ -520,26 +643,23 @@ N was only ever rendered at 540–588px against tidy fixtures: 5 scene objects,
 scene, a full effects stack, or long filenames. Do this before committing to
 row heights.
 
-### 11.3 Accessibility — one known failure
+### 11.3 Accessibility — the known failure is fixed
 
-Measured contrast against `--card` (`#1e2022`):
+`--faint-foreground` was 3.31:1 on `--card`, failing AA. It was retuned to
+`oklch(0.62 0.013 248)` in dark (4.50:1) and `oklch(0.545 0.014 248)` in light
+(4.56:1). Every content token now clears AA for body text:
 
-| Pair | Ratio | AA body (4.5:1) |
+| Token | Dark | Light |
 |---|---|---|
-| `--foreground` `#e6e8ea` | 13.30:1 | pass |
-| `--muted-foreground` `#9ba1a7` | 6.26:1 | pass |
-| `--warn` `#e0b062` | 8.22:1 | pass |
-| `--accent` `#6fa4dc` | 6.24:1 | pass |
-| `--accent-foreground` on `--accent` | 6.97:1 | pass |
-| **`--faint-foreground` `#6b7177`** | **3.31:1** | **fail** |
+| `--foreground` | 13.30:1 | 13.44:1 |
+| `--muted-foreground` | 6.27:1 | 5.52:1 |
+| `--faint-foreground` | 4.50:1 | 4.56:1 |
+| `--brand` | 6.24:1 | 5.05:1 |
+| `--warn` | 8.22:1 | 5.16:1 |
+| `--ok` | 7.42:1 | 4.94:1 |
 
-`--faint-foreground` fails AA for body text. It is currently used only for
-units, counts, micro-labels and connector lines — decorative or duplicated
-information — which is defensible, but fragile.
-
-**Rule: never use `--faint-foreground` for information available nowhere else.**
-If it needs to carry meaning, lighten it to ≥ `oklch(0.62 …)` (~4.6:1) first.
-Full audit still outstanding for hover and selected states.
+Still outstanding: hover and selected states have not been measured, and no
+screen-reader pass has been done.
 
 ### 11.4 Undecided
 - Whether the top bar keeps icon-only buttons or gains text labels.
@@ -550,22 +670,114 @@ Full audit still outstanding for hover and selected states.
 
 ## 12. Bugs found during this work
 
-### 12.1 Godot logo 404s — unfixed
-`src/components/export-workbench.tsx:147`
+All fixed unless marked otherwise.
 
-```ts
-godot: { light: "/godot.svg" },
+### 12.1 `npm run typecheck` checked nothing — **the important one**
+
+`tsconfig.json` has `"files": []` and only project references. With
+`--composite false` and no `--build`, `tsc -p tsconfig.json` compiled **zero
+files**, so the script passed unconditionally no matter what was in `src/`.
+
+Found by writing code that referenced two undefined variables and watching
+typecheck report success. It also explains an earlier silent breakage during
+the design exploration, where a deleted component was caught by the browser
+console rather than by the compiler.
+
+Fixed in `package.json`:
+
+```diff
+- tsc --noEmit -p tsconfig.json --composite false
++ tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
 ```
 
-`public/` contains **`godot.png`**. The request 404s and fails silently, because
-`FormatMark` renders `<img alt="" aria-hidden="true">` — an empty bordered box
-with nothing in the console. Every other `FORMAT_LOGOS` entry resolves. One
-character.
+**If you are continuing this work, trust `npm run typecheck` only from this
+commit onward.** Anything merged before it was never type-checked in CI.
 
-### 12.2 See also
+### 12.2 Godot logo served HTML instead of an image
+
+`export-workbench.tsx` mapped Godot to `/godot.svg`; `public/` ships
+`godot.png`. Doubly invisible: `<img alt="" aria-hidden>` fails silently, *and*
+the dev server's SPA fallback answered the request with `index.html` at
+**status 200**, so no 404 ever appeared in the network panel. Confirmed by
+comparing content types (`image/png` vs `text/html`). Fixed.
+
+### 12.3 Preview canvas composited to mid-grey in light mode
+
+The preview body used `bg-black/20` over a light panel, producing a grey wash
+directly behind the sprite — the exact contamination §1 prohibits. It now uses
+the `.checkerboard` utility, which states "transparent" and stays neutral in
+both themes.
+
+### 12.4 `border-accent-800` was never a colour
+
+The preview canvas asked for a Tailwind shade this theme does not define, so it
+rendered no border at all. Replaced with `border-stroke-strong`.
+
+### 12.5 Duplicate output filenames overwrote each other
+
+Two sequences may share a label — two rows both called "Animation" is normal —
+but the files they produce may not. `gifExporter` wrote `${row.label}.gif` for
+each row, so exporting two identically-named sequences produced **one** file in
+the archive, silently, with no error. `dedupeFileNames()` in
+`utils/exports/helpers.ts` now suffixes collisions before the extension
+(`Animation.gif`, `Animation-2.gif`); the exporter and the dialog preview share
+it, so what the dialog promises is what the archive contains. Covered by
+`tests/unit/dedupe-file-names.test.ts`.
+
+### 12.6 Stale rows survived a format switch
+
+The export dialog keyed its file rows by filename. Because gif could emit the
+same name twice (§12.5), React saw duplicate keys and kept stale rows alive:
+switching to GIF and back left `Animation.gif` in the list, accumulating on
+every switch. Fixed by the dedupe plus positional keys in `WritesTree`.
+
+Reproduced before fixing — one sequence was not enough to trigger it, which is
+why it survived earlier passes.
+
+### 12.7 Frame strip grew instead of scrolling
+
+The strip sat in a flex row with no `min-w-0`. A flex item defaults to
+`min-width: auto`, so instead of overflowing and scrolling inside its own
+container, the strip pushed the whole row wider than the panel — and the
+centre-on-play behaviour silently never fired, because nothing ever overflowed.
+Verified by asserting `scrollWidth > clientWidth` and measuring the active
+frame's offset from the container centre, rather than by eye.
+
+### 12.8 Capture interval was destroyed by integer rounding — **exported data**
+
+`row.fps` — the value written into the exported spritesheet manifest as
+`animations[].fps`, and the one the preview plays at — was computed as
+`Math.round(1000 / intervalMs)`. Integer rounding is lossy at the slow end and
+catastrophic past two seconds:
+
+| Capture interval | Stored fps | Plays / exports at | |
+|---|---|---|---|
+| 100ms | 10 | 100ms | ok |
+| 500ms | 2 | 500ms | ok |
+| 700ms | 1 | 1000ms | **43% wrong** |
+| 1500ms | 1 | 1000ms | **33% wrong** |
+| 2500ms | **0** | — | **`fps: 0` in the manifest** |
+
+Three separate faults compounded it:
+
+1. `row.fps ?? 12` in the manifest did not catch the zero — `??` is nullish
+   coalescing, and zero is not nullish, so `fps: 0` shipped to consumers.
+2. The preview clamped with `Math.max(1, fps)`, so every sub-1fps sequence
+   played at 1000ms no matter how far apart its frames were captured — hiding
+   the fault from anyone checking by eye.
+3. There were **two** capture paths computing fps independently (single frame
+   and recorded sequence). Fixing one and not the other made the two disagree,
+   which the reproducibility e2e would have caught.
+
+Now one helper, `fpsFromCaptureInterval()`, used by both paths, keeping six
+decimals — enough to round-trip every interval the UI allows to well under a
+millisecond, while whole rates stay whole (100ms is still exactly 10). The
+preview reads it back through `captureIntervalFromFps()`. Covered by
+`tests/unit/capture-interval.test.ts`.
+
+### 12.9 See also
+
 `improvements.md` documents unrelated model-cache defects found earlier.
-
----
 
 ## 13. Glossary
 

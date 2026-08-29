@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ScrubField } from "@/components/ui/scrub-field";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -437,12 +438,11 @@ function InspectorRow({ field }: { field: InspectorField }) {
         <Label className="text-muted-foreground/90">
           {formatFieldLabel(field.label)}
         </Label>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-3 gap-1">
           {labels.map((axis, index) => (
-            <NumericInput
+            <ScrubField
               key={axis}
-              className="h-8 bg-muted/20 px-2 font-mono"
-              aria-label={`${field.label} ${axis}`}
+              aria-label={`${formatFieldLabel(field.label)} ${axis.toUpperCase()}`}
               value={field.value[index]}
               step={field.step ?? 0.01}
               disabled={field.disabled}
@@ -541,38 +541,26 @@ function InspectorRow({ field }: { field: InspectorField }) {
   }
 
   if (field.kind === "number") {
-    const hasSlider =
-      typeof field.min === "number" && typeof field.max === "number";
-
     return (
-      <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-start gap-2 text-xs">
-        <Label className="pt-2 text-muted-foreground/90">
+      <div className="grid grid-cols-[minmax(6.5rem,0.7fr)_minmax(0,1fr)] items-center gap-2 text-xs">
+        <Label className="text-muted-foreground/90">
           {formatFieldLabel(field.label)}
         </Label>
-        <div className="grid gap-1.5">
-          <NumericInput
-            className="h-8 bg-muted/20 px-2 font-mono"
-            value={field.value}
-            min={field.min}
-            max={field.max}
-            step={field.step ?? 0.01}
-            disabled={field.disabled}
-            onValueChange={field.onChange}
-          />
-          {hasSlider ? (
-            <Slider
-              className="px-1 py-1"
-              value={[field.value]}
-              min={field.min}
-              max={field.max}
-              step={field.step ?? 0.01}
-              disabled={field.disabled}
-              onValueChange={([value]) => {
-                if (typeof value === "number") field.onChange(value);
-              }}
-            />
-          ) : null}
-        </div>
+        {/*
+          The row already carries the label, so the field carries none of its
+          own. A bounded field draws its own fill bar, which retires the
+          separate slider that used to sit underneath — one control reporting
+          itself instead of two controls describing one value.
+        */}
+        <ScrubField
+          value={field.value}
+          onValueChange={field.onChange}
+          min={field.min}
+          max={field.max}
+          step={field.step ?? 0.01}
+          disabled={field.disabled}
+          aria-label={formatFieldLabel(field.label)}
+        />
       </div>
     );
   }

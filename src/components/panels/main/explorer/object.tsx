@@ -182,8 +182,12 @@ export const ObjectExplorer = () => {
                 <div className="group relative flex w-full min-w-0 items-center">
                   <span
                     className={cn(
-                      "flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground",
-                      context.isSelected && "font-medium text-foreground",
+                      "flex min-w-0 items-center gap-2 text-xs text-muted-foreground",
+                      // The type icon takes the accent on the selected row, so
+                      // the row reads as chosen from its leading edge inward.
+                      context.isSelected &&
+                        "font-medium text-foreground [&>svg]:text-brand",
+                      !context.isSelected && "[&>svg]:text-faint-foreground",
                       isHidden && "opacity-60",
                     )}
                   >

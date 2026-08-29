@@ -555,6 +555,31 @@ export function createAtlasPlan(
   return buildRowsPlan(rows, normalized);
 }
 
+/**
+ * Fraction of a page's area the placed frames actually cover.
+ *
+ * Waste is the number worth reading on a packing result, and two surfaces
+ * report it — the rail's map and the export dialog. Both read it from the same
+ * plan through here, so they cannot drift into disagreeing about one atlas.
+ */
+export function getAtlasPageCoverage(
+  plan: AtlasPlan | null | undefined,
+  pageIndex = 0,
+): number {
+  const page = plan?.pages.find((item) => item.index === pageIndex);
+  if (!plan || !page) return 0;
+
+  const area = page.width * page.height;
+  if (area <= 0) return 0;
+
+  const filled = plan.placements.reduce(
+    (acc, item) => (item.page === page.index ? acc + item.w * item.h : acc),
+    0,
+  );
+
+  return filled / area;
+}
+
 export function atlasPageFileName(baseName: string, pageIndex: number): string {
   if (pageIndex === 0) return baseName;
   const dot = baseName.lastIndexOf(".");

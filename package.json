@@ -33,7 +33,7 @@
     "test:e2e:run": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:goldens": "vitest run --config vitest.e2e.config.ts tests/e2e/workflow-goldens.test.ts",
     "test:e2e:update-goldens": "cross-env UPDATE_WORKFLOW_GOLDENS=true vitest run --config vitest.e2e.config.ts tests/e2e/workflow-goldens.test.ts",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json --composite false",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "preview": "vite preview",
     "tauri": "tauri",
     "knip": "knip",

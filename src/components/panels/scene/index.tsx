@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ResizablePanel } from "@/components/ui/resizable";
+import { SequenceTile } from "@/components/export-workbench/sequence-tile";
 import { GripHorizontalIcon, RotateCcwIcon } from "lucide-react";
 import { useEntitiesStore } from "@/store/next/entities";
 import {
@@ -735,10 +736,16 @@ function AssetCreation() {
   }, [isDirty, name]);
 
   return (
-    <ResizablePanel>
+    <ResizablePanel className="min-h-0">
+      {/*
+        Centre column: the scene view, and the sequence beneath it. Both are
+        viewing surfaces, so they sit together — the rail beside them is for
+        deciding, not for watching.
+      */}
+      <div className="flex h-full min-h-0 flex-col gap-2">
       <div
         ref={previewHostRef}
-        className="relative h-full w-full overflow-hidden"
+        className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-stroke bg-card"
       >
         <EntityContextProvider isPreview={false}>
           <Canvas
@@ -758,7 +765,7 @@ function AssetCreation() {
 
         <section
           ref={previewPanelRef}
-          className="absolute z-20 flex min-h-56 min-w-80 resize flex-col overflow-hidden rounded-md border bg-background/95 shadow-xl backdrop-blur"
+          className="absolute z-20 flex min-h-56 min-w-80 resize flex-col overflow-hidden rounded-lg border border-stroke bg-surface-high"
           style={
             previewPosition
               ? {
@@ -776,15 +783,15 @@ function AssetCreation() {
           }
         >
           <div
-            className="flex h-10 shrink-0 cursor-grab select-none items-center gap-2 border-b px-2 active:cursor-grabbing"
+            className="flex h-9 shrink-0 cursor-grab select-none items-center gap-2 border-b border-stroke px-2 active:cursor-grabbing"
             onPointerDown={handlePreviewDragStart}
             onPointerMove={handlePreviewDragMove}
             onPointerUp={handlePreviewDragEnd}
             onPointerCancel={handlePreviewDragEnd}
           >
             <GripHorizontalIcon className="size-4 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              Preview Canvas
+            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Preview
             </span>
             <button
               type="button"
@@ -820,7 +827,7 @@ function AssetCreation() {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto bg-black/20 p-3">
+          <div className="checkerboard min-h-0 flex-1 overflow-auto p-3">
             <div className="flex min-h-full min-w-full items-center justify-center">
               <EntityContextProvider isPreview={true}>
                 <Canvas
@@ -835,7 +842,7 @@ function AssetCreation() {
                     gl.setClearColor("#000000", 0);
                   }}
                   gl={{ antialias: false, preserveDrawingBuffer: true }}
-                  className="rendering-[pixelated] border-2 border-accent-800"
+                  className="rendering-[pixelated] border border-stroke-strong"
                 >
                   <PreviewScene
                     isDragging={isDragging}
@@ -847,6 +854,9 @@ function AssetCreation() {
             </div>
           </div>
         </section>
+      </div>
+
+        <SequenceTile />
       </div>
     </ResizablePanel>
   );

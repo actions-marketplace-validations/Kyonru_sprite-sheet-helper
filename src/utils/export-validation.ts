@@ -24,9 +24,25 @@ const NORMAL_MAP_EXPORT_FORMATS = new Set<ExportFormat>([
 
 export type ExportValidationSeverity = "error" | "warning" | "info";
 
+/**
+ * The export rail is presented as a pipeline, so every message names the step
+ * that owns it. A message with no stage is reported against the whole export.
+ */
+export type ExportStage = "scene" | "capture" | "effects" | "pack" | "export";
+
 export type ExportValidationMessage = {
   severity: ExportValidationSeverity;
+  /**
+   * The headline. Printed identically on every surface that reports this
+   * problem — a rail and a dialog that paraphrase each other make the reader
+   * wonder whether they are looking at two different problems.
+   */
   message: string;
+  /** Longer form, for surfaces with room for it. Never a reworded headline. */
+  detail?: string;
+  /** The one-click remedy, where one exists. */
+  fix?: string;
+  stage?: ExportStage;
 };
 
 export type ExportValidationResult = {
@@ -81,6 +97,7 @@ export function validateExportRequest({
     messages.push({
       severity: "error",
       message: "Capture or add at least one frame before exporting.",
+      stage: "capture",
     });
     return { messages, blocking: true, plan: null };
   }
@@ -90,6 +107,7 @@ export function validateExportRequest({
       messages.push({
         severity: "error",
         message: `Sequence "${row.label}" has an invalid frame size.`,
+        stage: "capture",
       });
       continue;
     }
@@ -99,6 +117,7 @@ export function validateExportRequest({
       messages.push({
         severity: "error",
         message: `Sequence "${row.label}" frames are ${slot.slotW}x${slot.slotH}px including padding/extrusion and cannot fit within the ${options.maxAtlasSize}px max atlas size.`,
+        stage: "pack",
       });
     }
   }
@@ -106,24 +125,29 @@ export function validateExportRequest({
   if (options.padding > 0 && options.extrude === 0) {
     messages.push({
       severity: "warning",
-      message:
-        "Padding without extrusion leaves transparent gaps around frames; add extrusion if the atlas will be sampled with filtering.",
+      message: "Padding without extrusion leaves transparent gaps around frames.",
+      detail:
+        "Add extrusion if the atlas will be sampled with filtering, or the gaps show as seams between frames.",
+      stage: "pack",
     });
   }
 
   if (options.extrude > 0 && options.padding === 0) {
     messages.push({
       severity: "info",
-      message:
-        "Extrusion duplicates edge pixels around each frame. Add padding too if your engine needs additional empty spacing between slots.",
+      message: "Extrusion duplicates edge pixels around each frame.",
+      detail:
+        "Add padding too if your engine needs additional empty spacing between slots.",
+      stage: "pack",
     });
   }
 
   if (![1, 2, 4].includes(options.scale)) {
     messages.push({
       severity: "info",
-      message:
-        "Custom atlas scale is enabled. Frame dimensions are rounded to whole pixels.",
+      message: "Custom atlas scale is enabled.",
+      detail: "Frame dimensions are rounded to whole pixels.",
+      stage: "pack",
     });
   }
 
@@ -135,6 +159,7 @@ export function validateExportRequest({
     messages.push({
       severity: "warning",
       message: `${format} does not emit a normal-map atlas.`,
+      stage: "export",
     });
   }
 
@@ -143,13 +168,16 @@ export function validateExportRequest({
     if (coverage.totalFrames > 0 && coverage.normalFrames === 0) {
       messages.push({
         severity: "warning",
-        message:
-          "No frames have captured normals; the normal atlas will use transparent placeholders.",
+        message: "No frames have captured normals.",
+        detail: "The normal atlas will use transparent placeholders.",
+        stage: "capture",
       });
     } else if (coverage.missingFrames > 0) {
       messages.push({
         severity: "warning",
-        message: `${coverage.missingFrames} frames are missing captured normals and will use transparent placeholders.`,
+        message: `${coverage.missingFrames} frames are missing captured normals.`,
+        detail: "Those frames will use transparent placeholders.",
+        stage: "capture",
       });
     }
   }
@@ -163,6 +191,7 @@ export function validateExportRequest({
       messages.push({
         severity: "error",
         message: `Atlas page ${oversizedPage.index + 1} exceeds the ${options.maxAtlasSize}px max size.`,
+        stage: "pack",
       });
     }
 
@@ -172,8 +201,10 @@ export function validateExportRequest({
     ) {
       messages.push({
         severity: "error",
-        message:
-          "This exporter does not support multi-page atlases yet. Increase max atlas size, disable multi-page, or use the generic spritesheet format.",
+        message: "This exporter does not support multi-page atlases yet.",
+        detail:
+          "Increase max atlas size, disable multi-page, or use the generic spritesheet format.",
+        stage: "export",
       });
     }
   }

@@ -16,7 +16,11 @@ import { useModelsStore } from "@/store/next/models";
 import { useEntitiesStore } from "@/store/next/entities";
 import type { ExportFormat } from "@/types/file";
 import { exporters } from "@/utils/exports";
-import { buildZip, getNormalCoverage } from "@/utils/exports/helpers";
+import {
+  buildZip,
+  fpsFromCaptureInterval,
+  getNormalCoverage,
+} from "@/utils/exports/helpers";
 import { downloadFile } from "@/utils/assets";
 import { toast } from "sonner";
 import { normalizeAtlasOptions } from "@/utils/atlas";
@@ -338,7 +342,7 @@ export const useExport = () => {
               : undefined,
             exportWidth,
             exportHeight,
-            Math.round(1000 / captureTiming.intervalMs),
+            fpsFromCaptureInterval(captureTiming.intervalMs),
             capturePayload.rowMetadata,
           );
           lastIndex.current += 1;
@@ -401,7 +405,7 @@ export const useExport = () => {
       exportNormalMap ? normalImages.current[0]?.dataURL : undefined,
       width,
       height,
-      Math.round(1000 / intervals),
+      fpsFromCaptureInterval(intervals),
     );
     images.current = [];
     normalImages.current = [];
@@ -425,7 +429,7 @@ export const useExport = () => {
   }, [addScreenshot]);
 
   const onNewRow = useCallback(() => {
-    createEmptyRow(exportWidth, exportHeight, Math.round(1000 / intervals));
+    createEmptyRow(exportWidth, exportHeight, fpsFromCaptureInterval(intervals));
   }, [createEmptyRow, exportWidth, exportHeight, intervals]);
 
   useEffect(() => {

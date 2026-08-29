@@ -8,12 +8,20 @@ import { SelectedObjectTabs } from "./selected";
 
 const MainPanel = () => {
   return (
+    /* Two tiles, not one split pane: the scene and the thing you selected in
+       it are separate concerns, and the gutter says so. */
     <ResizablePanelGroup orientation="vertical" className="min-h-50">
-      <ResizablePanel defaultSize="25%">
+      <ResizablePanel
+        defaultSize="30%"
+        className="min-h-0 overflow-hidden rounded-lg border border-stroke bg-card"
+      >
         <FileExplorer />
       </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize="75%">
+      <ResizableHandle />
+      <ResizablePanel
+        defaultSize="70%"
+        className="min-h-0 overflow-hidden rounded-lg border border-stroke bg-card"
+      >
         <SelectedObjectTabs />
       </ResizablePanel>
     </ResizablePanelGroup>

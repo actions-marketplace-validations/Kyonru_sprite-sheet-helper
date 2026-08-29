@@ -12,7 +12,8 @@ import { installReloadStatusDebug } from "./utils/reload-status-debug";
 
 installReloadStatusDebug();
 
-// --- design lab (temporary; removed when the exploration finishes) ---
+// --- design lab: the explored variants, kept for reference against the
+// --- implementation. Dev-only, and stripped from every production build.
 if (
   import.meta.env.DEV &&
   new URLSearchParams(window.location.search).get("design_lab") === "true"

@@ -66,7 +66,7 @@ const TransformMenu = () => {
 
 const TopPanel = () => {
   return (
-    <Menubar className="w-full rounded-none justify-between">
+    <Menubar className="h-9 w-full shrink-0 justify-between rounded-lg border-stroke bg-card px-1">
       <div className="flex items-center flex-row">
         <FileMenu />
         <CreateMenu />

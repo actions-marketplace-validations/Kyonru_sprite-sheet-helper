@@ -91,23 +91,17 @@ function App() {
         <Layout>
           <ResizablePanelGroup
             orientation="horizontal"
-            className="min-h-0 max-w-full overflow-hidden border"
+            className="min-h-0 max-w-full overflow-hidden bg-transparent"
           >
-            <ResizablePanel
-              defaultSize="20%"
-              className="min-h-0 overflow-hidden"
-            >
+            <ResizablePanel defaultSize="20%" className="min-h-0 overflow-hidden">
               <MainPanel />
             </ResizablePanel>
-            <ResizableHandle withHandle />
+            <ResizableHandle />
             <SharedSceneProvider>
               <AssetCreation />
             </SharedSceneProvider>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              defaultSize="20%"
-              className="min-h-0 overflow-hidden"
-            >
+            <ResizableHandle />
+            <ResizablePanel defaultSize="20%" className="min-h-0 overflow-hidden">
               <ExportModal />
             </ResizablePanel>
           </ResizablePanelGroup>
