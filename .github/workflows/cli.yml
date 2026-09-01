@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload spritesheet test output
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: spritesheet-test-output
           path: ./sprite-sheet-test/
@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload format test outputs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: format-tests-output
           path: ./format-test-*/
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload workflow reproducibility outputs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: workflow-reproducibility-output
           path: ./.e2e-artifacts/workflow-reproducibility/
@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload workflow golden outputs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: workflow-golden-output
           path: ./.e2e-artifacts/workflow-goldens/
