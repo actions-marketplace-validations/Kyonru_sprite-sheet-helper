@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CopyIcon,
   EraserIcon,
@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -82,18 +83,17 @@ export function MaterialsWorkbenchProvider() {
       open={state.open}
       onOpenChange={(open) => setState((current) => ({ ...current, open }))}
     >
-      <DialogContent className="flex h-[86vh] max-w-[min(1440px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)] flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="z-999 flex h-[94dvh] w-[96dvw] max-w-[96dvw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[96dvw]">
+        <DialogHeader className="flex min-h-14 shrink-0 justify-center border-b px-4 py-0">
+          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             <PaletteIcon className="size-4" />
-            Materials Workbench
+            <span>Materials Workbench</span>
           </DialogTitle>
-          <DialogDescription>
-            Edit reusable materials, assign them to imported model slots, and
-            generate non-destructive retro texture variants.
+          <DialogDescription className="text-xs">
+            Reusable materials, model slot assignments, and retro texture variants.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-4">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-3">
           <MaterialsPanel initialModelUuid={state.modelUuid} />
         </div>
       </DialogContent>
@@ -244,14 +244,14 @@ export function MaterialsPanel({
   return (
     <div
       className={cn(
-        "grid h-full min-h-0 min-w-0 gap-3",
+        "grid h-full w-full min-h-0 min-w-0 gap-3",
         compact
           ? "auto-rows-min grid-cols-1 overflow-y-auto pr-1"
           : "auto-rows-min grid-cols-1 overflow-y-auto pr-1 xl:auto-rows-fr xl:grid-cols-[minmax(220px,0.85fr)_minmax(260px,1fr)_minmax(320px,1.1fr)] xl:overflow-hidden xl:pr-0",
       )}
     >
       <section className="flex min-h-[220px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<Layers3Icon className="size-4" />} title="Slots" />
+        <PanelHeader icon={Layers3Icon} title="Slots" className="border-b" />
         <div className="grid shrink-0 gap-2 border-b p-3">
           <Select value={modelUuid} onValueChange={setModelUuid}>
             <SelectTrigger className="w-full">
@@ -328,7 +328,7 @@ export function MaterialsPanel({
       </section>
 
       <section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<PaletteIcon className="size-4" />} title="Library" />
+        <PanelHeader icon={PaletteIcon} title="Library" className="border-b" />
         <div className="shrink-0 border-b p-3">
           <div className="rounded-md border bg-muted/20 p-3">
             <div className="flex items-start gap-3">
@@ -404,7 +404,7 @@ export function MaterialsPanel({
       </section>
 
       <section className="flex min-h-[320px] min-w-0 flex-col overflow-hidden rounded-md border bg-background xl:min-h-0">
-        <PanelHeader icon={<SparklesIcon className="size-4" />} title="Edit" />
+        <PanelHeader icon={SparklesIcon} title="Edit" className="border-b" />
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {!selectedMaterial ? (
             <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -757,20 +757,5 @@ function ToggleRow({
         onCheckedChange={(value) => onCheckedChange(Boolean(value))}
       />
     </label>
-  );
-}
-
-function PanelHeader({
-  icon,
-  title,
-}: {
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-      <span className="shrink-0">{icon}</span>
-      <span className="min-w-0 truncate">{title}</span>
-    </div>
   );
 }

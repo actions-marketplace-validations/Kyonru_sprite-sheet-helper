@@ -8,12 +8,10 @@ import {
 
 import AssetCreation from "./components/panels/scene";
 import Layout from "./layout";
-import { SharedContextProvider } from "./context/sharedContext";
 import MainPanel from "./components/panels/main";
 
 import { ExportModal } from "./components/export-modal";
 import { MainPanelContextProvider } from "./components/panels/main/context";
-import { useCreateStore } from "leva";
 import { useAddCamera } from "./hooks/next/use-add-camera";
 import { useAddLight } from "./hooks/next/use-add-light";
 import { useEffect, useRef } from "react";
@@ -23,6 +21,9 @@ import { ConfirmProvider } from "./components/confirm";
 import { ReorderModalProvider } from "./components/animation-reorder-modal";
 import { SettingsModalProvider } from "./components/panels/top/settings";
 import { useSettingsStore } from "./store/next/settings";
+import { useCamerasStore } from "./store/next/cameras";
+import { useEntitiesStore } from "./store/next/entities";
+import { useLightsStore } from "./store/next/lights";
 import { DocsModalProvider } from "./components/docs";
 import { AboutModalProvider } from "./components/about-modal";
 import { ShaderEditorProvider } from "./components/custom-shader-modal";
@@ -38,8 +39,6 @@ THREE.Cache.enabled = true;
 initShortcutRegistry();
 
 function App() {
-  const mainPanelStore = useCreateStore();
-
   const addCamera = useAddCamera(true);
   const addLight = useAddLight(false);
   const init = useRef(false);
@@ -48,6 +47,14 @@ function App() {
     const initProject = () => {
       if (init.current) return;
       init.current = true;
+
+      const hasExistingProjectState =
+        Object.keys(useEntitiesStore.getState().entities).length > 0 ||
+        Object.keys(useCamerasStore.getState().cameras).length > 0 ||
+        Object.keys(useLightsStore.getState().lights).length > 0;
+
+      if (hasExistingProjectState) return;
+
       addCamera({
         position: [0, 2.5, 3],
       });
@@ -80,34 +87,26 @@ function App() {
 
   return (
     <ThemeProvider defaultTheme={theme} storageKey="vite-ui-theme">
-      <SharedContextProvider>
-        <MainPanelContextProvider defaultStore={mainPanelStore}>
-          <Layout>
-            <ResizablePanelGroup
-              orientation="horizontal"
-              className="min-h-0 max-w-full overflow-hidden border"
-            >
-              <ResizablePanel
-                defaultSize="20%"
-                className="min-h-0 overflow-hidden"
-              >
-                <MainPanel />
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-              <SharedSceneProvider>
-                <AssetCreation />
-              </SharedSceneProvider>
-              <ResizableHandle withHandle />
-              <ResizablePanel
-                defaultSize="20%"
-                className="min-h-0 overflow-hidden"
-              >
-                <ExportModal />
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </Layout>
-        </MainPanelContextProvider>
-      </SharedContextProvider>
+      <MainPanelContextProvider>
+        <Layout>
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="min-h-0 max-w-full overflow-hidden bg-transparent"
+          >
+            <ResizablePanel defaultSize="20%" className="min-h-0 overflow-hidden">
+              <MainPanel />
+            </ResizablePanel>
+            <ResizableHandle />
+            <SharedSceneProvider>
+              <AssetCreation />
+            </SharedSceneProvider>
+            <ResizableHandle />
+            <ResizablePanel defaultSize="20%" className="min-h-0 overflow-hidden">
+              <ExportModal />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </Layout>
+      </MainPanelContextProvider>
       <ConfirmProvider />
       <ReorderModalProvider />
       <SettingsModalProvider />

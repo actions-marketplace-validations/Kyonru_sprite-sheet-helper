@@ -5,11 +5,20 @@ import {
   type CaptureStopPayload,
   type CaptureProgressPayload,
 } from "@/lib/events";
+import * as THREE from "three";
 import { useModelsStore } from "@/store/next/models";
+import { useRefsStore } from "@/store/next/refs";
 import { useImagesStore } from "@/store/next/images";
 import { useSettingsStore } from "@/store/next/settings";
-import { useCamerasStore } from "@/store/next/cameras";
+import {
+  DEFAULT_ORTHOGRAPHIC_CAMERA,
+  DEFAULT_PERSPECTIVE_CAMERA,
+  ORTHOGRAPHIC_FRUSTUM_SIZE,
+  useCamerasStore,
+} from "@/store/next/cameras";
+import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
 import { useTargetsStore } from "@/store/next/targets";
+import { useTransformsStore } from "@/store/next/transforms";
 import {
   WORKFLOW_PRESETS,
   type WorkflowDefinition,
@@ -18,13 +27,34 @@ import {
 import { useEntitiesStore } from "@/store/next/entities";
 import {
   buildWorkflowSteps,
+  getWorkflowStepCaptureSettings,
+  type BuildWorkflowStepsInput,
+  type WorkflowCaptureSettings,
   type WorkflowStep,
 } from "@/utils/workflows";
 import {
+  getWorkflowCameraTransform,
   resolveWorkflowCamera,
   type ResolvedWorkflowCamera,
   type WorkflowRunOptions,
 } from "@/utils/workflow-camera";
+import {
+  computePosedBounds,
+  getClipSampleTimes,
+  normalizeFitOptions,
+  sampleBoundsAtTimes,
+  unionBoxes,
+  type FitOptions,
+} from "@/utils/fit-solve";
+import type { CameraType } from "@/types/camera";
+import {
+  EMPTY_WORKFLOW_FIT,
+  solveWorkflowFit,
+  type WorkflowFitLens,
+  type WorkflowFitResult,
+  type WorkflowFitStep,
+} from "@/utils/workflow-fit";
+import { getSpritePostprocessPadding } from "@/utils/sprite-postprocess";
 
 export type WorkflowStatus =
   | "idle"
@@ -33,8 +63,11 @@ export type WorkflowStatus =
   | "cancelled"
   | "error";
 
+export type WorkflowPhase = "idle" | "measuring" | "capturing";
+
 export interface WorkflowState {
   status: WorkflowStatus;
+  phase: WorkflowPhase;
   currentStep: number;
   totalSteps: number;
   currentFrame: number;
@@ -46,6 +79,7 @@ export interface WorkflowState {
   failureStep?: string;
   error?: string;
   currentCamera?: ResolvedWorkflowCamera;
+  fitWarnings?: string[];
 }
 
 const CAPTURE_TIMEOUT_BUFFER_MS = 5000;
@@ -53,6 +87,7 @@ const ANIMATION_READY_TIMEOUT_MS = 5000;
 
 const initialState: WorkflowState = {
   status: "idle",
+  phase: "idle",
   currentStep: 0,
   totalSteps: 0,
   currentFrame: 0,
@@ -142,11 +177,21 @@ const waitForAnimationReady = (
     PubSub.on(EventType.ANIMATION_READY, handler);
   });
 
-function buildStepsFromStore(workflow: WorkflowDefinition): WorkflowStep[] {
-  const { clips, models } = useModelsStore.getState();
+type BuildStepsFromStoreOptions = Pick<
+  BuildWorkflowStepsInput,
+  "includeHiddenAnimations"
+>;
+
+function buildStepsFromStore(
+  workflow: WorkflowDefinition,
+  options: BuildStepsFromStoreOptions = {},
+): WorkflowStep[] {
+  const { clips, hiddenAnimations, models } = useModelsStore.getState();
   return buildWorkflowSteps(workflow, {
     clips,
+    hiddenAnimations,
     modelUuids: Object.keys(models),
+    includeHiddenAnimations: options.includeHiddenAnimations,
   });
 }
 
@@ -160,14 +205,37 @@ function getDirectionForStep(
   );
 }
 
-async function setStepAnimation(step: WorkflowStep) {
+function shouldSkipStep(
+  step: WorkflowStep,
+  options?: WorkflowRunOptions,
+): boolean {
+  return options?.skipStepLabels?.includes(step.rowLabel) ?? false;
+}
+
+async function setStepAnimation(
+  step: WorkflowStep,
+  options?: WorkflowRunOptions,
+) {
   if (step.animationName === "none") return;
   if (!step.modelUuid) return;
 
   const modelState = useModelsStore.getState();
+  if (shouldSkipStep(step, options)) {
+    modelState.setAnimation(step.modelUuid, "none");
+    return;
+  }
+
   const modelClips = modelState.clips[step.modelUuid] ?? [];
   const clip = modelClips.find((c) => c.clip.name === step.animationName);
   if (!clip) return;
+
+  if (options?.forceAnimationsInPlace) {
+    modelState.forceCurrentAnimationInPlace(
+      step.modelUuid,
+      step.animationName,
+      options.forceAnimationsInPlaceMode,
+    );
+  }
 
   const currentAnimation = modelState.animations[step.modelUuid];
   const shouldWait = currentAnimation !== step.animationName;
@@ -176,16 +244,19 @@ async function setStepAnimation(step: WorkflowStep) {
     : Promise.resolve();
 
   modelState.setAnimation(step.modelUuid, step.animationName);
-  modelState.setDuration(step.modelUuid, step.animationName, [
-    0,
-    clip.clip.duration,
-  ]);
   modelState.mixerRef[step.modelUuid]?.setTime(0);
 
   await waiter;
 }
 
-function resetStepAnimation(step: WorkflowStep) {
+function resetStepAnimation(
+  step: WorkflowStep,
+  options?: WorkflowRunOptions,
+) {
+  if (shouldSkipStep(step, options)) {
+    return;
+  }
+
   if (!step.modelUuid || step.animationName === "none") return;
 
   const modelState = useModelsStore.getState();
@@ -195,6 +266,130 @@ function resetStepAnimation(step: WorkflowStep) {
   const mixer = modelState.mixerRef[step.modelUuid];
   mixer?.setTime(0);
   if (clip) mixer?.clipAction(clip.clip)?.play();
+}
+
+/**
+ * A looping action wraps t=duration back to t=0, so the final sample is nudged
+ * inside the range to keep the end pose.
+ */
+const CLIP_END_EPSILON = 1e-3;
+
+/**
+ * The live scene object for a model.
+ *
+ * Registered by the model component; `getModelFromCache` in the models store
+ * looks like the obvious source but its cache is never written to.
+ */
+function getModelObject(uuid: string): THREE.Object3D | null {
+  return useRefsStore.getState().refs[uuid]?.current ?? null;
+}
+
+function getAnimationKey(step: WorkflowStep): string {
+  return `${step.modelUuid ?? "none"}:${step.animationName}`;
+}
+
+function resolveFitLens(
+  cameraType: CameraType,
+  aspect: number,
+  cameraUUID?: string,
+): { lens: WorkflowFitLens; baseZoom: number } {
+  const camera = cameraUUID
+    ? useCamerasStore.getState().cameras[cameraUUID]
+    : undefined;
+
+  if (cameraType === "orthographic") {
+    // Must mirror the export camera built in the scene, or solved zooms land
+    // at the wrong scale.
+    const size = ORTHOGRAPHIC_FRUSTUM_SIZE;
+    return {
+      lens: {
+        cameraType: "orthographic",
+        frustum: {
+          left: (size * aspect) / -2,
+          right: (size * aspect) / 2,
+          top: size / 2,
+          bottom: size / -2,
+        },
+      },
+      baseZoom: camera?.zoom ?? DEFAULT_ORTHOGRAPHIC_CAMERA.zoom ?? 1,
+    };
+  }
+
+  return {
+    lens: {
+      cameraType: "perspective",
+      fov: camera?.fov ?? DEFAULT_PERSPECTIVE_CAMERA.fov ?? 75,
+    },
+    baseZoom: 1,
+  };
+}
+
+/**
+ * Measures world bounds once per animation.
+ *
+ * Bounds do not depend on the camera, so the directions of a preset all reuse
+ * the same measurement — the model is posed once per clip, not once per row.
+ * Driving the live mixer (rather than a private one) means trims, renames and
+ * forced-in-place clips are all already applied.
+ */
+async function measureWorkflowBounds(
+  steps: WorkflowStep[],
+  options: WorkflowRunOptions | undefined,
+  fitOptions: FitOptions,
+  onProgress: (measured: number, total: number) => void,
+  isAborted: () => boolean,
+): Promise<Record<string, THREE.Box3>> {
+  const representatives = new Map<string, WorkflowStep>();
+  for (const step of steps) {
+    const key = getAnimationKey(step);
+    if (!representatives.has(key)) representatives.set(key, step);
+  }
+
+  const entries = [...representatives.entries()];
+  const bounds: Record<string, THREE.Box3> = {};
+
+  for (let index = 0; index < entries.length; index++) {
+    if (isAborted()) break;
+
+    const [key, step] = entries[index];
+    onProgress(index + 1, entries.length);
+
+    if (!step.modelUuid) continue;
+    const root = getModelObject(step.modelUuid);
+    if (!root) continue;
+
+    await setStepAnimation(step, options);
+
+    const modelState = useModelsStore.getState();
+    const mixer = modelState.mixerRef[step.modelUuid];
+    const clip = (modelState.clips[step.modelUuid] ?? []).find(
+      (entry) => entry.clip.name === step.animationName,
+    )?.clip;
+
+    if (!mixer || !clip) {
+      bounds[key] = computePosedBounds(root, fitOptions);
+      continue;
+    }
+
+    const [start, end] = modelState.durations[step.modelUuid]?.[
+      step.animationName
+    ] ?? [0, clip.duration];
+    const span = Math.max(0, end - start);
+    const lastUsable = Math.max(start, end - CLIP_END_EPSILON);
+    const times = getClipSampleTimes(span, fitOptions.samples).map((offset) =>
+      Math.min(start + offset, lastUsable),
+    );
+
+    const sampled = sampleBoundsAtTimes(
+      root,
+      (time) => mixer.setTime(time),
+      times,
+      fitOptions,
+    );
+    bounds[key] = unionBoxes(sampled.map((entry) => entry.box));
+  }
+
+  return bounds;
 }
 
 export const useWorkflow = () => {
@@ -227,7 +422,10 @@ export const useWorkflow = () => {
   }, []);
 
   const buildSteps = useCallback(
-    (workflow: WorkflowDefinition): WorkflowStep[] => buildStepsFromStore(workflow),
+    (
+      workflow: WorkflowDefinition,
+      options?: BuildStepsFromStoreOptions,
+    ): WorkflowStep[] => buildStepsFromStore(workflow, options),
     [],
   );
 
@@ -237,58 +435,167 @@ export const useWorkflow = () => {
   ) => {
     useEntitiesStore.getState().unselectEntity();
     abortRef.current = false;
+    const previousExportNormalMap = useSettingsStore.getState().exportNormalMap;
+    const captureNormalMaps = options?.captureNormalMaps;
+    const shouldRestoreExportNormalMap =
+      captureNormalMaps !== undefined && captureNormalMaps !== previousExportNormalMap;
+    if (shouldRestoreExportNormalMap) {
+      useSettingsStore.getState().setExportNormalMap(captureNormalMaps);
+    }
 
-    const steps = buildStepsFromStore(workflow);
+    const steps = buildStepsFromStore(workflow, {
+      includeHiddenAnimations: options?.includeHiddenAnimations,
+    }).filter((step) => !shouldSkipStep(step, options));
     const workflowRunId = Date.now().toString();
     workflowRunIdRef.current = workflowRunId;
 
     const cameraDistance = useSettingsStore.getState().cameraDistance;
     const cameraAngle = useSettingsStore.getState().cameraAngle;
-    const intervals = useImagesStore.getState().intervals;
-    const iterations = useImagesStore.getState().iterations;
+    const defaultCaptureSettings: WorkflowCaptureSettings = {
+      frameIntervalMs: useImagesStore.getState().intervals,
+      frameCount: useImagesStore.getState().iterations,
+    };
     const cameraUUID = useCamerasStore.getState().mainCamera;
+    const mainCameraType = cameraUUID
+      ? useCamerasStore.getState().cameras[cameraUUID]?.type
+      : undefined;
+    const workflowCameraType = options?.cameraType ?? mainCameraType ?? "perspective";
+    if (cameraUUID) {
+      useCamerasStore.getState().setCameraType(cameraUUID, workflowCameraType);
+    }
     const target: [number, number, number] = cameraUUID
       ? (useTargetsStore.getState().targets[cameraUUID] ?? [0, 0, 0])
       : [0, 0, 0];
 
+    const fitOptions = normalizeFitOptions(options?.fit);
+    const shouldFit = fitOptions.mode === "auto" && steps.length > 0;
+
     setWorkflowState({
       status: "running",
+      phase: shouldFit ? "measuring" : "capturing",
       currentStep: 0,
       totalSteps: steps.length,
       currentFrame: 0,
-      expectedFrames: iterations,
+      expectedFrames: defaultCaptureSettings.frameCount,
       currentLabel: "",
       currentAnimation: "",
       currentDirection: "",
       startedAt: Date.now(),
     });
 
+    let fitResult: WorkflowFitResult = EMPTY_WORKFLOW_FIT;
+
     try {
+      if (shouldFit) {
+        const boundsByAnimation = await measureWorkflowBounds(
+          steps,
+          options,
+          fitOptions,
+          (measured, total) => {
+            setWorkflowState((prev) => ({
+              ...prev,
+              currentStep: measured,
+              totalSteps: total,
+            }));
+          },
+          () => abortRef.current,
+        );
+
+        const { exportWidth, exportHeight } = useSettingsStore.getState();
+        const aspect = Math.max(1e-6, exportWidth / exportHeight);
+        const { lens, baseZoom } = resolveFitLens(
+          workflowCameraType,
+          aspect,
+          cameraUUID,
+        );
+
+        fitResult = solveWorkflowFit({
+          steps: steps.map<WorkflowFitStep>((step) => {
+            const camera = resolveWorkflowCamera({
+              direction: getDirectionForStep(workflow, step),
+              defaultDistance: cameraDistance,
+              defaultCameraAngle: cameraAngle,
+              defaultCameraType: workflowCameraType,
+              defaultTarget: target,
+              options,
+            });
+
+            return {
+              rowLabel: step.rowLabel,
+              animationKey: getAnimationKey(step),
+              animationName: step.animationName,
+              directionLabel: step.directionLabel,
+              phi: camera.phi,
+              theta: camera.theta,
+            };
+          }),
+          boundsByAnimation,
+          lens,
+          viewport: { width: exportWidth, height: exportHeight },
+          baseDistance: cameraDistance,
+          baseZoom,
+          baseTarget: target,
+          // An explicit target is a deliberate pivot; never override it.
+          recenter: options?.target === undefined,
+          reservedMargin: getSpritePostprocessPadding(
+            useSpritePostprocessStore.getState().getSnapshot(),
+          ),
+          fit: fitOptions,
+        });
+
+        setWorkflowState((prev) => ({
+          ...prev,
+          phase: "capturing",
+          currentStep: 0,
+          totalSteps: steps.length,
+          ...(fitResult.warnings.length
+            ? { fitWarnings: fitResult.warnings }
+            : {}),
+        }));
+      }
+
       for (let index = 0; index < steps.length; index++) {
         if (abortRef.current) break;
 
         const step = steps[index];
         const dir = getDirectionForStep(workflow, step);
+        const captureSettings = getWorkflowStepCaptureSettings(
+          step,
+          options?.captureSettingsByAnimation,
+          defaultCaptureSettings,
+        );
 
         setWorkflowState((prev) => ({
           ...prev,
           currentStep: index + 1,
           currentFrame: 0,
-          expectedFrames: iterations,
+          expectedFrames: captureSettings.frameCount,
           currentLabel: step.rowLabel,
           currentAnimation: step.animationName,
           currentDirection: step.directionLabel,
         }));
 
-        await setStepAnimation(step);
-        resetStepAnimation(step);
+        await setStepAnimation(step, options);
+        resetStepAnimation(step, options);
+
+        // The solved framing is fed in as the run-level camera value, so
+        // per-direction overrides still win over it.
+        const fitSolution = fitResult.solutions[step.rowLabel];
+        const stepOptions = fitSolution
+          ? {
+              ...options,
+              cameraDistance: fitSolution.zoom ?? fitSolution.distance,
+              target: fitSolution.target,
+            }
+          : options;
 
         const camera = resolveWorkflowCamera({
           direction: dir,
           defaultDistance: cameraDistance,
           defaultCameraAngle: cameraAngle,
+          defaultCameraType: workflowCameraType,
           defaultTarget: target,
-          options,
+          options: stepOptions,
         });
 
         setWorkflowState((prev) => ({
@@ -296,16 +603,32 @@ export const useWorkflow = () => {
           currentCamera: camera,
         }));
 
+        if (cameraUUID) {
+          useTransformsStore
+            .getState()
+            .setTransform(cameraUUID, getWorkflowCameraTransform(camera));
+          useTargetsStore.getState().setTarget(cameraUUID, [...camera.target]);
+
+          if (camera.cameraType === "orthographic") {
+            useCamerasStore.getState().setCamera(cameraUUID, {
+              zoom: camera.zoom ?? camera.distance,
+            });
+          }
+        }
+
         PubSub.emit(EventType.SET_CAMERA_ANGLE, {
           position: camera.position,
           target: camera.target,
+          immediate: true,
         });
         await waitForAnimationFrames(2);
 
         const captureDone = waitForCaptureDone({
           label: step.rowLabel,
           workflowRunId,
-          timeoutMs: intervals * iterations + CAPTURE_TIMEOUT_BUFFER_MS,
+          timeoutMs:
+            captureSettings.frameIntervalMs * captureSettings.frameCount +
+            CAPTURE_TIMEOUT_BUFFER_MS,
         });
 
         PubSub.emit(EventType.START_ASSETS_CREATION, {
@@ -313,6 +636,17 @@ export const useWorkflow = () => {
           workflowRunId,
           stepIndex: index + 1,
           totalSteps: steps.length,
+          frameIntervalMs: captureSettings.frameIntervalMs,
+          frameCount: captureSettings.frameCount,
+          rowMetadata: {
+            workflow: {
+              workflowId: workflow.id,
+              workflowLabel: workflow.label,
+              ...(step.modelUuid ? { modelUuid: step.modelUuid } : {}),
+              animationName: step.animationName,
+              directionLabel: step.directionLabel,
+            },
+          },
         });
 
         const result = await captureDone;
@@ -330,7 +664,7 @@ export const useWorkflow = () => {
       }
 
       const status = abortRef.current ? "cancelled" : "done";
-      setWorkflowState((prev) => ({ ...prev, status }));
+      setWorkflowState((prev) => ({ ...prev, status, phase: "idle" }));
 
       PubSub.emit(EventType.STOP_WORKFLOW, {
         workflow,
@@ -341,6 +675,7 @@ export const useWorkflow = () => {
       setWorkflowState((prev) => ({
         ...prev,
         status: "error",
+        phase: "idle",
         failureStep: prev.currentLabel,
         error: (err as Error).message,
       }));
@@ -351,6 +686,9 @@ export const useWorkflow = () => {
         error: (err as Error).message,
       });
     } finally {
+      if (shouldRestoreExportNormalMap) {
+        useSettingsStore.getState().setExportNormalMap(previousExportNormalMap);
+      }
       workflowRunIdRef.current = null;
     }
   }, []);

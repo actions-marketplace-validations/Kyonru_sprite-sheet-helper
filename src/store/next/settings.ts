@@ -24,10 +24,13 @@ export interface SettingsState {
   exportHeight: number;
   cameraDistance: number;
   cameraAngle?: number;
+  /** Transparent border reserved around the sprite, in pixels per side. */
+  fitMargin: number;
   exportNormalMap: boolean;
   atlasLayout: AtlasLayout;
   atlasPadding: number;
   atlasBleed: number;
+  atlasSpriteMargin: number;
   atlasScale: number;
   maxAtlasSize: number;
   allowMultiPage: boolean;
@@ -45,6 +48,7 @@ interface SettingsActions extends SnapshotEnabledStore<SettingsState> {
   setExportHeight: (exportHeight: number) => void;
   setCameraDistance: (cameraDistance: number) => void;
   setCameraAngle: (cameraAngle?: number) => void;
+  setFitMargin: (fitMargin: number) => void;
   setExportNormalMap: (exportNormalMap: boolean) => void;
   setAtlasOptions: (atlasOptions: Partial<AtlasOptions>) => void;
   setEditorBackgroundColor: (editorBackgroundColor: string) => void;
@@ -63,10 +67,12 @@ const initialState: SettingsState = {
   exportHeight: 64,
   cameraDistance: 5,
   cameraAngle: undefined,
+  fitMargin: 0,
   exportNormalMap: false,
   atlasLayout: "rows",
   atlasPadding: 0,
   atlasBleed: 0,
+  atlasSpriteMargin: 0,
   atlasScale: 1,
   maxAtlasSize: 2048,
   allowMultiPage: false,
@@ -85,10 +91,12 @@ const WATCHED_KEYS: (keyof SettingsState)[] = [
   "exportHeight",
   "cameraDistance",
   "cameraAngle",
+  "fitMargin",
   "exportNormalMap",
   "atlasLayout",
   "atlasPadding",
   "atlasBleed",
+  "atlasSpriteMargin",
   "atlasScale",
   "maxAtlasSize",
   "allowMultiPage",
@@ -113,12 +121,15 @@ export const useSettingsStore = create<SettingsStore>()(
         setExportHeight: (exportHeight) => set({ exportHeight }),
         setCameraDistance: (cameraDistance) => set({ cameraDistance }),
         setCameraAngle: (cameraAngle) => set({ cameraAngle }),
+        setFitMargin: (fitMargin) => set({ fitMargin: Math.max(0, fitMargin) }),
         setExportNormalMap: (exportNormalMap) => set({ exportNormalMap }),
         setAtlasOptions: (atlasOptions) =>
           set((state) => ({
             atlasLayout: atlasOptions.layout ?? state.atlasLayout,
             atlasPadding: atlasOptions.padding ?? state.atlasPadding,
             atlasBleed: atlasOptions.extrude ?? state.atlasBleed,
+            atlasSpriteMargin:
+              atlasOptions.spriteMargin ?? state.atlasSpriteMargin,
             atlasScale: atlasOptions.scale ?? state.atlasScale,
             maxAtlasSize: atlasOptions.maxAtlasSize ?? state.maxAtlasSize,
             allowMultiPage:
@@ -138,11 +149,13 @@ export const useSettingsStore = create<SettingsStore>()(
             exportWidth: get().exportWidth,
             exportHeight: get().exportHeight,
             cameraDistance: get().cameraDistance,
+            fitMargin: get().fitMargin,
             cameraAngle: get().cameraAngle,
             exportNormalMap: get().exportNormalMap,
             atlasLayout: get().atlasLayout,
             atlasPadding: get().atlasPadding,
             atlasBleed: get().atlasBleed,
+            atlasSpriteMargin: get().atlasSpriteMargin,
             atlasScale: get().atlasScale,
             maxAtlasSize: get().maxAtlasSize,
             allowMultiPage: get().allowMultiPage,
@@ -164,11 +177,13 @@ export const useSettingsStore = create<SettingsStore>()(
             exportWidth: snapshot.exportWidth,
             exportHeight: snapshot.exportHeight,
             cameraDistance: snapshot.cameraDistance,
+            fitMargin: snapshot.fitMargin ?? 0,
             cameraAngle: snapshot.cameraAngle,
             exportNormalMap: snapshot.exportNormalMap ?? false,
             atlasLayout: snapshot.atlasLayout ?? "rows",
             atlasPadding: snapshot.atlasPadding ?? 0,
             atlasBleed: snapshot.atlasBleed ?? 0,
+            atlasSpriteMargin: snapshot.atlasSpriteMargin ?? 0,
             atlasScale: snapshot.atlasScale ?? 1,
             maxAtlasSize: snapshot.maxAtlasSize ?? 2048,
             allowMultiPage: snapshot.allowMultiPage ?? false,

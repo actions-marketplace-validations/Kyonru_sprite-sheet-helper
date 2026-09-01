@@ -9,19 +9,16 @@ import {
   Wand2,
   Zap,
 } from "lucide-react";
-import {
-  button,
-  LevaPanel,
-  LevaStoreProvider,
-  useControls,
-  useCreateStore,
-  useStoreContext,
-} from "leva";
-import type { Schema } from "leva/plugin";
 import { confirm } from "@/components/confirm";
 import { openShaderEditor } from "@/components/custom-shader-modal";
+import { InspectorPanel, type InspectorField } from "@/components/inspector";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { PanelHeader } from "@/components/panels/panel-header";
+import {
+  PanelTabsList,
+  PanelTabsTrigger,
+} from "@/components/panels/panel-tabs";
 import {
   BLEND_FUNCTIONS,
   EDGE_DETECTION_MODES,
@@ -36,7 +33,6 @@ import {
   TONE_MAPPING_MODES,
   type EffectPresetId,
 } from "@/constants/effects";
-import { LEVA_THEME } from "@/constants/theming";
 import { cn } from "@/lib/utils";
 import { useEffectsStore } from "@/store/next/effects";
 import type { EffectType } from "@/types/effects";
@@ -58,18 +54,9 @@ const OPTIONS_MAP: Record<string, Record<string, number | string>> = {
   palette: PALETTE_INDEX,
 };
 
-const EFFECT_LEVA_THEME = {
-  ...LEVA_THEME,
-  sizes: {
-    ...LEVA_THEME.sizes,
-    controlWidth: "56%",
-    rowHeight: "28px",
-    numberInputMinWidth: "52px",
-  },
-};
-
 const CONTROL_LABELS: Record<string, string> = {
   adaptive: "Adaptive",
+  alphaThreshold: "Alpha Threshold",
   amplitude: "Amplitude",
   averageLuminance: "Average Luma",
   bias: "Bias",
@@ -150,6 +137,8 @@ const CONTROL_LABELS: Record<string, string> = {
   start: "Start",
   strength: "Strength",
   taper: "Taper",
+  threshold: "Threshold",
+  thickness: "Thickness",
   tint: "Tint",
   visibleEdgeColor: "Visible Edge",
   wavelength: "Wavelength",
@@ -167,22 +156,29 @@ function controlLabel(key: string): string {
   return CONTROL_LABELS[key] ?? key;
 }
 
+function isColorValue(key: string, value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (key.toLowerCase().includes("color") || /^#[0-9a-f]{6}$/i.test(value))
+  );
+}
+
 const EffectDetails = ({ uuid }: { uuid?: string }) => {
-  const store = useStoreContext();
   const effects = useEffectsStore((state) => state.effects);
   const setEffect = useEffectsStore((state) => state.setEffect);
 
-  const inputs = useMemo(() => {
-    const i: Schema = {};
-    if (!uuid) return i;
+  const fields = useMemo(() => {
+    const items: InspectorField[] = [];
+    if (!uuid) return items;
 
     const effect = effects[uuid];
-    if (!effect || !uuid) return {};
+    if (!effect || !uuid) return items;
 
-    i.ID = {
-      value: `${uuid}`,
-      editable: false,
-    };
+    items.push({
+      kind: "readonly",
+      label: "ID",
+      value: uuid,
+    });
 
     for (const key in effect) {
       if (key === "type") continue;
@@ -198,15 +194,19 @@ const EffectDetails = ({ uuid }: { uuid?: string }) => {
         key === "preset"
       ) {
         const options = OPTIONS_MAP[key];
-        i[controlLabel(key)] = {
+        items.push({
+          kind: "select",
+          label: controlLabel(key),
           options,
           value,
           onChange: (newValue: unknown) => {
             setEffect(uuid, { [key]: newValue } as never);
           },
-        };
+        });
       } else if (key === "scale" && effect.type === "grid") {
-        i[controlLabel(key)] = {
+        items.push({
+          kind: "number",
+          label: controlLabel(key),
           min: 0,
           max: 1,
           step: 0.1,
@@ -214,23 +214,33 @@ const EffectDetails = ({ uuid }: { uuid?: string }) => {
           onChange: (newValue: unknown) => {
             setEffect(uuid, { [key]: newValue } as never);
           },
-        };
+        });
       } else if (key === "mode") {
         const options = MODE_OPTIONS_MAP[effect.type];
 
-        i[controlLabel(key)] = {
-          options,
-          value,
-          onChange: (newValue: unknown) => {
-            setEffect(uuid, { [key]: newValue } as never);
-          },
-        };
+        if (options) {
+          items.push({
+            kind: "select",
+            label: controlLabel(key),
+            options,
+            value,
+            onChange: (newValue: unknown) => {
+              setEffect(uuid, { [key]: newValue } as never);
+            },
+          });
+        }
       } else if (key === "fragmentShader") {
-        i[controlLabel(key)] = button(() => {
-          openShaderEditor(uuid);
+        items.push({
+          kind: "button",
+          label: controlLabel(key),
+          action: () => {
+            openShaderEditor(uuid);
+          },
         });
       } else if (key === "brightness" || key === "contrast") {
-        i[controlLabel(key)] = {
+        items.push({
+          kind: "number",
+          label: controlLabel(key),
           value,
           min: -1,
           max: 1,
@@ -238,9 +248,11 @@ const EffectDetails = ({ uuid }: { uuid?: string }) => {
           onChange: (newValue: unknown) => {
             setEffect(uuid, { [key]: newValue } as never);
           },
-        };
+        });
       } else if (key === "damp") {
-        i[controlLabel(key)] = {
+        items.push({
+          kind: "number",
+          label: controlLabel(key),
           value,
           min: 0,
           max: 0.99,
@@ -248,44 +260,62 @@ const EffectDetails = ({ uuid }: { uuid?: string }) => {
           onChange: (newValue: unknown) => {
             setEffect(uuid, { [key]: newValue } as never);
           },
-        };
-      } else {
-        i[controlLabel(key)] = {
+        });
+      } else if (typeof value === "number") {
+        items.push({
+          kind: "number",
+          label: controlLabel(key),
           value,
           onChange: (newValue: unknown) => {
             setEffect(uuid, { [key]: newValue } as never);
           },
-        };
+        });
+      } else if (typeof value === "boolean") {
+        items.push({
+          kind: "boolean",
+          label: controlLabel(key),
+          value,
+          onChange: (newValue: unknown) => {
+            setEffect(uuid, { [key]: newValue } as never);
+          },
+        });
+      } else if (isColorValue(key, value)) {
+        items.push({
+          kind: "color",
+          label: controlLabel(key),
+          value,
+          onChange: (newValue: unknown) => {
+            setEffect(uuid, { [key]: newValue } as never);
+          },
+        });
+      } else if (typeof value === "string") {
+        items.push({
+          kind: "text",
+          label: controlLabel(key),
+          value,
+          onChange: (newValue: unknown) => {
+            setEffect(uuid, { [key]: newValue } as never);
+          },
+        });
+      } else {
+        items.push({
+          kind: "readonly",
+          label: controlLabel(key),
+          value: JSON.stringify(value),
+        });
       }
     }
 
-    return i;
+    return items;
   }, [effects, uuid, setEffect]);
 
-  useControls(() => inputs satisfies Schema, { store }, [uuid]);
-
-  return (
-    <LevaPanel
-      theme={EFFECT_LEVA_THEME}
-      hidden={false}
-      neverHide
-      store={store}
-      fill
-      flat
-      titleBar={false}
-    />
-  );
+  return <InspectorPanel fields={fields} />;
 };
 
 const EffectContext = () => {
   const selected = useEffectsStore((state) => state.selected);
-  const store = useCreateStore();
 
-  return (
-    <LevaStoreProvider key={selected} store={store}>
-      <EffectDetails uuid={selected} />
-    </LevaStoreProvider>
-  );
+  return <EffectDetails uuid={selected} />;
 };
 
 function PresetsPanel() {
@@ -482,39 +512,35 @@ export const EffectsTabs = () => {
     : "No effect selected";
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <section className="shrink-0 rounded-md border bg-background p-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <Sparkles size={14} />
-              Effects Workbench
-            </div>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {stackCount} effect{stackCount === 1 ? "" : "s"} in stack ·{" "}
-              {title}
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="flex h-full min-h-0 flex-col">
+      <PanelHeader
+        icon={Sparkles}
+        title="Effects"
+        hint={stackCount > 0 ? title : "none selected"}
+        className="border-b"
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Tabs defaultValue="details" className="grid gap-2">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="presets">Presets</TabsTrigger>
-            <TabsTrigger value="add">Add</TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="details" className="grid gap-0">
+          <div className="px-3 py-2">
+            <PanelTabsList className="grid grid-cols-3">
+              <PanelTabsTrigger value="presets">Presets</PanelTabsTrigger>
+              <PanelTabsTrigger value="add">Add</PanelTabsTrigger>
+              <PanelTabsTrigger value="details">Details</PanelTabsTrigger>
+            </PanelTabsList>
+          </div>
 
-          <GuidancePanel />
+          <div className="px-3 pb-3">
+            <GuidancePanel />
+          </div>
 
-          <TabsContent value="presets" className="mt-0">
+          <TabsContent value="presets" className="mt-0 px-3 pb-3">
             <PresetsPanel />
           </TabsContent>
-          <TabsContent value="add" className="mt-0">
+          <TabsContent value="add" className="mt-0 px-3 pb-3">
             <EffectBrowser />
           </TabsContent>
-          <TabsContent value="details" className="mt-0">
+          <TabsContent value="details" className="mt-0 px-3 pb-3">
             <DetailsPanel />
           </TabsContent>
         </Tabs>

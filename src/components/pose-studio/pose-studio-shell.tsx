@@ -16,6 +16,7 @@ import {
   ClipboardPaste,
   Crosshair,
   Eye,
+  EyeOff,
   FlipHorizontal,
   Gauge,
   Image as ImageIcon,
@@ -38,12 +39,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { PanelHeader } from "@/components/panels/panel-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ACCEPTED_MODEL_FILE_TYPES } from "@/constants/file";
 import { useMediaPipe } from "@/hooks/next/use-mediapipe";
 import { useModelsStore } from "@/store/next/models";
+import { useEntitiesStore } from "@/store/next/entities";
 import { importFile } from "@/utils/assets";
 import { isWeb } from "@/utils/platform";
 import { parseModel } from "@/utils/model";
@@ -357,28 +368,6 @@ function QualityBadge({ quality }: { quality: PoseQualityResult }) {
   );
 }
 
-function PanelHeader({
-  icon: Icon,
-  title,
-  detail,
-}: {
-  icon: LucideIcon;
-  title: string;
-  detail?: string;
-}) {
-  return (
-    <div className="flex min-h-10 items-center gap-2 border-b px-3">
-      <Icon size={15} />
-      <span className="text-sm font-medium">{title}</span>
-      {detail && (
-        <span className="ml-auto truncate text-xs text-muted-foreground">
-          {detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function SourceModeButton({
   active,
   icon: Icon,
@@ -571,7 +560,12 @@ function PoseSourcePanel({
 
   return (
     <aside className="flex min-h-0 flex-col border-r bg-background">
-      <PanelHeader icon={Camera} title="Capture" detail={inputMode} />
+      <PanelHeader
+        icon={Camera}
+        title="Capture"
+        hint={inputMode}
+        className="border-b"
+      />
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
         <div className="grid gap-2">
           {isWeb() && (
@@ -1030,6 +1024,8 @@ interface PoseSavePanelProps {
   saving: boolean;
   onClipNameChange: (value: string) => void;
   onSave: () => void;
+  forceInPlace: boolean;
+  onForceInPlaceChange: (value: boolean) => void;
 }
 
 function PoseSavePanel({
@@ -1041,6 +1037,8 @@ function PoseSavePanel({
   saving,
   onClipNameChange,
   onSave,
+  forceInPlace,
+  onForceInPlaceChange,
 }: PoseSavePanelProps) {
   const summary = getPoseDraftSummary(draft);
   const bestMarker = qualityMarkers.reduce<PoseFrameQualityMarker | null>(
@@ -1094,6 +1092,14 @@ function PoseSavePanel({
           {mappingAnalysis.issues[0]}
         </div>
       )}
+      <label className="flex items-center justify-between rounded-md border px-3 py-2 text-xs">
+        <span>Force imported animations in place</span>
+        <Switch
+          checked={forceInPlace}
+          onCheckedChange={onForceInPlaceChange}
+          disabled={saving}
+        />
+      </label>
       <Button onClick={onSave} disabled={saving || frames.length === 0}>
         <Save size={14} />
         {saving ? "Saving" : "Save to Model"}
@@ -1171,6 +1177,8 @@ interface PoseInspectorProps {
   qualityMarkers: PoseFrameQualityMarker[];
   onClipNameChange: (value: string) => void;
   onSave: () => void;
+  forceInPlace: boolean;
+  onForceInPlaceChange: (value: boolean) => void;
 }
 
 function PoseInspector({
@@ -1234,6 +1242,8 @@ function PoseInspector({
   qualityMarkers,
   onClipNameChange,
   onSave,
+  forceInPlace,
+  onForceInPlaceChange,
 }: PoseInspectorProps) {
   const selectedEffector = ikTargetToEffector(selectedIkTarget);
   const missingIkLabels = Object.entries(ikStatus.missing)
@@ -1248,7 +1258,12 @@ function PoseInspector({
 
   return (
     <aside className="flex min-h-0 flex-col border-l bg-background">
-      <PanelHeader icon={Settings2} title="Inspector" detail={tab} />
+      <PanelHeader
+        icon={Settings2}
+        title="Inspector"
+        hint={tab}
+        className="border-b"
+      />
       <div className="grid grid-cols-4 gap-1 border-b p-2">
         {(["assist", "mapping", "edit", "save"] as const).map((item) => (
           <Button
@@ -1772,6 +1787,8 @@ function PoseInspector({
             saving={saving}
             onClipNameChange={onClipNameChange}
             onSave={onSave}
+            forceInPlace={forceInPlace}
+            onForceInPlaceChange={onForceInPlaceChange}
           />
         )}
       </div>
@@ -1786,10 +1803,51 @@ interface PoseStudioShellProps {
 
 export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
   const model = useModelsStore((state) => state.models[modelUuid]);
+  const entity = useEntitiesStore((state) => state.entities[modelUuid]);
+  const entities = useEntitiesStore((state) => state.entities);
+  const models = useModelsStore((state) => state.models);
+  const allClips = useModelsStore((state) => state.clips);
   const clips = useModelsStore((state) => state.clips[modelUuid] ?? []);
   const addClip = useModelsStore((state) => state.addClip);
   const setAnimation = useModelsStore((state) => state.setAnimation);
+  const importAnimationsFromSource = useModelsStore(
+    (state) => state.importAnimationsFromSource,
+  );
+  const setVisibility = useEntitiesStore((state) => state.setVisibility);
+  const isModelVisible = entity?.visible !== false;
+  const modelReady = model?.loadState === "loaded";
   const defaultClipName = `Pose Clip ${clips.length + 1}`;
+  const candidateSourceModels = useMemo(() => {
+    const entries = Object.entries(models)
+      .filter(
+        ([uuid, modelState]) =>
+          uuid !== modelUuid &&
+          modelState.source === "file" &&
+          modelState.loadState === "loaded" &&
+          allClips[uuid]?.length,
+      )
+      .map(([uuid]) => ({
+        uuid,
+        label: entities[uuid]?.name ?? models[uuid]?.fileName ?? uuid,
+      }));
+
+    entries.sort((left, right) => left.label.localeCompare(right.label));
+    return entries;
+  }, [entities, modelUuid, models, allClips]);
+  const [importSourceUuid, setImportSourceUuid] = useState(
+    candidateSourceModels.at(0)?.uuid,
+  );
+  const [importForceInPlace, setImportForceInPlace] = useState(false);
+
+  useEffect(() => {
+    setImportSourceUuid((current) => {
+      if (current && candidateSourceModels.some((entry) => entry.uuid === current)) {
+        return current;
+      }
+
+      return candidateSourceModels.at(0)?.uuid;
+    });
+  }, [candidateSourceModels]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -1933,7 +1991,6 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
     [availableBones, boneRemap, screenLandmarks, worldLandmarks],
   );
   const poseDetected = Boolean(screenLandmarks && worldLandmarks);
-  const modelReady = model?.loadState === "loaded";
   const mappedBoneCount = mappingAnalysis.mapped;
   const expectedBoneCount = Object.keys(BODY_PART_LABELS).length;
 
@@ -1977,6 +2034,77 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
+
+  const toggleModelVisibility = useCallback(() => {
+    setVisibility(modelUuid, !isModelVisible);
+  }, [isModelVisible, modelUuid, setVisibility]);
+
+  const handleImportFromLoadedModel = useCallback(async () => {
+    if (!modelReady) {
+      toast.error("Model must be loaded before importing animations.");
+      return;
+    }
+
+    if (!importSourceUuid) {
+      toast.error("Select a source model first.");
+      return;
+    }
+
+    try {
+      const { importedNames } = await importAnimationsFromSource(modelUuid, {
+        sourceModelUuid: importSourceUuid,
+        forceInPlace: importForceInPlace,
+      });
+
+      if (importedNames.length === 0) {
+        toast.info("No animations found in source model.");
+        return;
+      }
+
+      toast.success(
+        `Imported ${importedNames.length} animation(s): ${importedNames.join(", ")}`,
+      );
+    } catch (error) {
+      toast.error("Failed to import animations from model", {
+        description: (error as Error).message,
+      });
+    }
+  }, [
+    importSourceUuid,
+    importAnimationsFromSource,
+    modelReady,
+    modelUuid,
+    importForceInPlace,
+  ]);
+
+  const handleImportFromFile = useCallback(() => {
+    if (!modelReady) {
+      toast.error("Model must be loaded before importing animations.");
+      return;
+    }
+
+    importFile(ACCEPTED_MODEL_FILE_TYPES, async (file) => {
+      try {
+        const { importedNames } = await importAnimationsFromSource(modelUuid, {
+          sourceFile: file,
+          forceInPlace: importForceInPlace,
+        });
+
+        if (importedNames.length === 0) {
+          toast.info("No animations found in source file.");
+          return;
+        }
+
+        toast.success(
+          `Imported ${importedNames.length} animation(s) from file: ${importedNames.join(", ")}`,
+        );
+      } catch (error) {
+        toast.error("Failed to import animations from file", {
+          description: (error as Error).message,
+        });
+      }
+    });
+  }, [importAnimationsFromSource, modelReady, modelUuid, importForceInPlace]);
 
   useEffect(() => {
     autoDetectedRef.current = false;
@@ -2859,6 +2987,11 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
   const handleSave = useCallback(async () => {
     const frames = buildFinalPoseFrames(draft);
     if (frames.length === 0) return;
+    if (!modelReady) {
+      toast.error("Model must be loaded before saving animations.");
+      return;
+    }
+
     const trimmed = ui.clipName.trim() || defaultClipName;
     setSaving(true);
     try {
@@ -2882,6 +3015,7 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
     draft,
     modelUuid,
     onClose,
+    modelReady,
     setAnimation,
     ui.clipName,
   ]);
@@ -2946,6 +3080,59 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
           </span>
         </div>
         <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={toggleModelVisibility}
+            title={isModelVisible ? "Hide model" : "Show model"}
+            aria-label={isModelVisible ? "Hide model" : "Show model"}
+          >
+            {isModelVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+          </Button>
+          <Label
+            htmlFor="import-force-in-place"
+            className="flex cursor-pointer items-center gap-2 px-1 text-xs text-muted-foreground"
+          >
+            <span>Force in place</span>
+            <Switch
+              id="import-force-in-place"
+              checked={importForceInPlace}
+              onCheckedChange={setImportForceInPlace}
+              disabled={!modelReady}
+            />
+          </Label>
+          <Select
+            value={importSourceUuid ?? ""}
+            onValueChange={(value) => setImportSourceUuid(value)}
+            disabled={candidateSourceModels.length === 0 || !modelReady}
+          >
+            <SelectTrigger className="w-44" disabled={candidateSourceModels.length === 0 || !modelReady}>
+              <SelectValue placeholder="Import from model" />
+            </SelectTrigger>
+            <SelectContent>
+              {candidateSourceModels.map((entry) => (
+                <SelectItem key={entry.uuid} value={entry.uuid}>
+                  {entry.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleImportFromLoadedModel}
+            disabled={candidateSourceModels.length === 0 || !modelReady || !importSourceUuid}
+          >
+            Import Anim
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleImportFromFile}
+            disabled={!modelReady}
+          >
+            Import File
+          </Button>
           <Button
             size="icon"
             variant="ghost"
@@ -3110,6 +3297,8 @@ export function PoseStudioShell({ modelUuid, onClose }: PoseStudioShellProps) {
           clipName={ui.clipName}
           saving={saving}
           qualityMarkers={qualityMarkers}
+          forceInPlace={importForceInPlace}
+          onForceInPlaceChange={setImportForceInPlace}
           onClipNameChange={(clipName) =>
             dispatchUi({ type: "setClipName", clipName })
           }

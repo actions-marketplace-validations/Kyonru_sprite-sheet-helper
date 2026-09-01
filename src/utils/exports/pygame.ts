@@ -2,8 +2,8 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
 
 export const createPygamePy = (
@@ -85,11 +85,14 @@ export const createPygamePy = (
   return lines.join("\n");
 };
 
-export const createPygameExample = (json: SpritesheetJSON): string => {
+export const createPygameExample = (
+  json: SpritesheetJSON,
+  moduleName = "spritesheet",
+): string => {
   const firstName = json.animations[0]?.name ?? "walk";
   return [
     `import pygame`,
-    `from spritesheet import load`,
+    `from ${moduleName} import load`,
     ``,
     `pygame.init()`,
     `screen = pygame.display.set_mode((320, 240))`,
@@ -119,23 +122,37 @@ export const pygameExporter: Exporter<"pygame"> = {
   id: "pygame",
   label: "Pygame",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "pygame",
+      spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Pygame");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "Pygame");
+    }
 
     return {
       filename: "pygame.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
-        manifestFile,
-        { name: "spritesheet.py", content: createPygamePy(json) },
-        { name: "main.py", content: createPygameExample(json) },
+        ...sheets.flatMap((sheet) => [
+          ...sheetImageFiles(sheet),
+          sheet.assets.manifestFile,
+          {
+            name: `${sheet.base}.py`,
+            content: createPygamePy(sheet.assets.json, sheet.imagePath),
+          },
+        ]),
+        {
+          name: "main.py",
+          content: createPygameExample(sheets[0].assets.json, sheets[0].base),
+        },
       ],
     };
   },

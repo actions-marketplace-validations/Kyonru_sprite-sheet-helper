@@ -1,26 +1,107 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExportRow } from "@/types/file";
+import type { ExportRow, ExportRowMetadata } from "@/types/file";
 import { renderAtlasPages } from "@/utils/atlas-renderer";
 import { buildSpritesheetAssets } from "@/utils/exports/helpers";
+import { applySpritePostprocessRows } from "@/utils/sprite-postprocess";
 import { exportRow, frame } from "../helpers/export-fixtures";
+import type { SpritePostprocessSnapshot } from "@/types/sprite-postprocess";
 
 vi.mock("@/utils/atlas-renderer", () => {
   return { renderAtlasPages: vi.fn() };
 });
 
+vi.mock("@/utils/sprite-postprocess", () => {
+  return { applySpritePostprocessRows: vi.fn(async (rows) => rows) };
+});
+
 const renderAtlasPagesMock = vi.mocked(renderAtlasPages);
+const applySpritePostprocessRowsMock = vi.mocked(applySpritePostprocessRows);
 
 const encodeRows = (rows: ExportRow[]) =>
   Buffer.from(JSON.stringify(rows.map((row) => row.images))).toString("base64");
 
+const workflowMetadata = (
+  directionLabel: string,
+): ExportRowMetadata => ({
+  workflow: {
+    workflowId: "topdown-4dir",
+    workflowLabel: "Top Down 4-directional",
+    modelUuid: "model-a",
+    animationName: "walk",
+    directionLabel,
+  },
+});
+
 describe("buildSpritesheetAssets", () => {
   beforeEach(() => {
+    applySpritePostprocessRowsMock.mockImplementation(async (rows) => rows);
     renderAtlasPagesMock.mockImplementation(
       async (rows, plan) =>
         plan.pages.map(
           (page) =>
             `data:image/png;base64,${encodeRows(rows)}-${page.index}`,
         ),
+    );
+  });
+
+  it("applies sprite postprocessing before atlas packing", async () => {
+    const rows = [
+      exportRow("walk", [frame("c0")], [frame("n0")], {
+        frameWidth: 8,
+        frameHeight: 8,
+      }),
+    ];
+    const processedRows = [
+      {
+        ...rows[0],
+        images: [frame("processed-c0")],
+        normalImages: [frame("padded-n0")],
+        frameWidth: 14,
+        frameHeight: 14,
+      },
+    ];
+    const spritePostprocess: SpritePostprocessSnapshot = {
+      enabled: true,
+      effects: [
+        {
+          id: "outline",
+          type: "outerOutline",
+          enabled: true,
+          color: "#000000",
+          thickness: 3,
+          opacity: 1,
+        },
+      ],
+      selectedRow: 0,
+      selectedFrame: 0,
+      compareBeforeAfter: false,
+    };
+    applySpritePostprocessRowsMock.mockResolvedValueOnce(processedRows);
+
+    const result = await buildSpritesheetAssets(rows, {
+      includeNormalMap: true,
+      spritePostprocess,
+    });
+
+    expect(applySpritePostprocessRowsMock).toHaveBeenCalledWith(
+      rows,
+      spritePostprocess,
+    );
+    expect(result.manifest.animations[0]).toMatchObject({
+      frameWidth: 14,
+      frameHeight: 14,
+    });
+    expect(renderAtlasPagesMock).toHaveBeenNthCalledWith(
+      1,
+      processedRows,
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(renderAtlasPagesMock).toHaveBeenNthCalledWith(
+      2,
+      [{ ...processedRows[0], images: [frame("padded-n0")] }],
+      expect.any(Object),
+      expect.any(Object),
     );
   });
 
@@ -76,6 +157,41 @@ describe("buildSpritesheetAssets", () => {
       slot: { w: 22, h: 18 },
       source: { width: 8, height: 6 },
     });
+  });
+
+  it("emits workflow direction metadata in json and manifest files", async () => {
+    const rows = [
+      exportRow("walk_N", [frame("n0")], undefined, {
+        metadata: workflowMetadata("N"),
+      }),
+      exportRow("walk_E", [frame("e0")], undefined, {
+        metadata: workflowMetadata("E"),
+      }),
+    ];
+
+    const result = await buildSpritesheetAssets(rows);
+    const manifest = JSON.parse(result.manifestFile.content);
+    const expectedGroup = [
+      {
+        name: "walk",
+        workflowId: "topdown-4dir",
+        workflowLabel: "Top Down 4-directional",
+        modelUuid: "model-a",
+        directions: [
+          { label: "N", animation: "walk_N" },
+          { label: "E", animation: "walk_E" },
+        ],
+      },
+    ];
+
+    expect(result.json.animations[0].workflow).toEqual(
+      workflowMetadata("N").workflow,
+    );
+    expect(result.json.directionalAnimations).toEqual(expectedGroup);
+    expect(manifest.animations[1].workflow).toEqual(
+      workflowMetadata("E").workflow,
+    );
+    expect(manifest.directionalAnimations).toEqual(expectedGroup);
   });
 
   it("emits a matching normal atlas when all frames have normals", async () => {

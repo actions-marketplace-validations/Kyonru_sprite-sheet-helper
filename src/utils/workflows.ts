@@ -7,6 +7,18 @@ export interface WorkflowStep {
   rowLabel: string;
 }
 
+export type WorkflowCaptureSettings = {
+  frameIntervalMs: number;
+  frameCount: number;
+};
+
+export type WorkflowCaptureSettingsInput = Partial<WorkflowCaptureSettings>;
+
+export type WorkflowCaptureSettingsByAnimation = Record<
+  string,
+  WorkflowCaptureSettingsInput
+>;
+
 export type WorkflowClipEntry = {
   clip: {
     name: string;
@@ -16,14 +28,26 @@ export type WorkflowClipEntry = {
 export type BuildWorkflowStepsInput = {
   clips: Record<string, WorkflowClipEntry[]>;
   modelUuids: string[];
+  hiddenAnimations?: Record<string, string[]>;
+  includeHiddenAnimations?: boolean;
 };
 
 export function buildWorkflowSteps(
   workflow: WorkflowDefinition,
-  { clips, modelUuids }: BuildWorkflowStepsInput,
+  {
+    clips,
+    modelUuids,
+    hiddenAnimations = {},
+    includeHiddenAnimations = false,
+  }: BuildWorkflowStepsInput,
 ): WorkflowStep[] {
   const clipEntries = Object.entries(clips).filter(
-    ([, modelClips]) => modelClips.length > 0,
+    ([modelUuid, modelClips]) =>
+      modelClips.some(
+        (entry) =>
+          includeHiddenAnimations ||
+          !hiddenAnimations[modelUuid]?.includes(entry.clip.name),
+      ),
   );
 
   if (clipEntries.length === 0) {
@@ -35,7 +59,16 @@ export function buildWorkflowSteps(
   }
 
   const rawSteps = clipEntries.flatMap(([modelUuid, modelClips]) => {
-    const animationNames = [...new Set(modelClips.map((c) => c.clip.name))];
+    const hiddenNames = hiddenAnimations[modelUuid] ?? [];
+    const animationNames = [
+      ...new Set(
+        modelClips
+          .map((c) => c.clip.name)
+          .filter(
+            (name) => includeHiddenAnimations || !hiddenNames.includes(name),
+          ),
+      ),
+    ];
     return animationNames.flatMap((animationName) =>
       workflow.directions.map((dir) => ({
         modelUuid,
@@ -63,4 +96,103 @@ export function buildWorkflowSteps(
       rowLabel: `${modelPrefix}${baseLabel}`,
     };
   });
+}
+
+export type WorkflowStepGroup = {
+  key: string;
+  animationName: string;
+  steps: WorkflowStep[];
+};
+
+export function isWorkflowStepHidden(
+  step: WorkflowStep,
+  hiddenAnimations: Record<string, string[]>,
+): boolean {
+  return Boolean(
+    step.modelUuid &&
+      step.animationName !== "none" &&
+      hiddenAnimations[step.modelUuid]?.includes(step.animationName),
+  );
+}
+
+export function getHiddenWorkflowStepLabels(
+  steps: WorkflowStep[],
+  hiddenAnimations: Record<string, string[]>,
+): string[] {
+  return steps
+    .filter((step) => isWorkflowStepHidden(step, hiddenAnimations))
+    .map((step) => step.rowLabel);
+}
+
+export function getDisabledWorkflowAnimationGroupKeys(
+  groups: WorkflowStepGroup[],
+  skippedStepLabels: string[],
+): string[] {
+  const skippedLabels = new Set(skippedStepLabels);
+
+  return groups
+    .filter(
+      (group) =>
+        group.steps.length > 0 &&
+        group.steps.every((step) => skippedLabels.has(step.rowLabel)),
+    )
+    .map((group) => group.key);
+}
+
+export function getWorkflowAnimationGroupKey(
+  step: Pick<WorkflowStep, "animationName">,
+): string {
+  return step.animationName;
+}
+
+export function normalizeWorkflowCaptureSettings(
+  settings: WorkflowCaptureSettingsInput | undefined,
+  defaults: WorkflowCaptureSettings,
+): WorkflowCaptureSettings {
+  const interval = Number.isFinite(settings?.frameIntervalMs)
+    ? settings?.frameIntervalMs
+    : defaults.frameIntervalMs;
+  const count = Number.isFinite(settings?.frameCount)
+    ? settings?.frameCount
+    : defaults.frameCount;
+
+  return {
+    frameIntervalMs: Math.max(1, Math.round(interval ?? 1)),
+    frameCount: Math.max(1, Math.round(count ?? 1)),
+  };
+}
+
+export function getWorkflowStepCaptureSettings(
+  step: WorkflowStep,
+  settingsByAnimation: WorkflowCaptureSettingsByAnimation | undefined,
+  defaults: WorkflowCaptureSettings,
+): WorkflowCaptureSettings {
+  return normalizeWorkflowCaptureSettings(
+    settingsByAnimation?.[getWorkflowAnimationGroupKey(step)],
+    defaults,
+  );
+}
+
+export function groupWorkflowStepsByAnimation(
+  steps: WorkflowStep[],
+): WorkflowStepGroup[] {
+  const groups = new Map<string, WorkflowStepGroup>();
+
+  for (const step of steps) {
+    const key = getWorkflowAnimationGroupKey(step);
+    const group = groups.get(key);
+
+    if (group) {
+      group.steps.push(step);
+      continue;
+    }
+
+    groups.set(key, {
+      key,
+      animationName: step.animationName,
+      steps: [step],
+    });
+  }
+
+  return Array.from(groups.values());
 }

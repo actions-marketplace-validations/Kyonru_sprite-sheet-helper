@@ -123,6 +123,19 @@ type CameraAction =
   | CameraEditAction
   | CameraActiveAction;
 
+type ModelHiddenAnimationsAction = Action<
+  "model/hiddenAnimations",
+  string[],
+  string[]
+>;
+type ModelAnimationRenameAction = Action<
+  "model/animationRename",
+  string,
+  string
+>;
+
+type ModelAction = ModelHiddenAnimationsAction | ModelAnimationRenameAction;
+
 export type HistoryAction =
   | TransformAction
   | TargetAction
@@ -130,7 +143,8 @@ export type HistoryAction =
   | SettingsChange
   | LightAction
   | EffectAction
-  | CameraAction;
+  | CameraAction
+  | ModelAction;
 
 export type HistoryBatch = {
   type: "batch";

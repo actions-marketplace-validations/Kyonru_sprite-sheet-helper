@@ -1,26 +1,34 @@
 import type { Exporter } from "@/types/file";
-import { buildSpritesheetAssets } from "./helpers";
+import { buildSheetAssets } from "./helpers";
 
 export const SpritesheetExporter: Exporter<"spritesheet"> = {
   id: "spritesheet",
   label: "Spritesheet",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions }) {
-    const { json, manifestFile, colorPages, normalPages } =
-      await buildSpritesheetAssets(exportedImages, {
-        includeNormalMap,
-        atlasOptions,
-        exporterId: "spritesheet",
-      });
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
+      includeNormalMap,
+      atlasOptions,
+      exporterId: "spritesheet",
+      spritePostprocess,
+    });
 
     return {
       filename: "spritesheet.zip",
-      files: [
-        ...colorPages,
-        ...normalPages,
-        { name: "spritesheet.json", content: JSON.stringify(json, null, 2) },
-        manifestFile,
-      ],
+      files: sheets.flatMap(({ base, assets }) => [
+        ...assets.colorPages,
+        ...assets.normalPages,
+        {
+          name: `${base}.json`,
+          content: JSON.stringify(assets.json, null, 2),
+        },
+        assets.manifestFile,
+      ]),
     };
   },
 };

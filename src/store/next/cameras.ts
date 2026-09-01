@@ -13,9 +13,17 @@ export const DEFAULT_PERSPECTIVE_CAMERA: CameraComponent = {
   far: 100,
 };
 
+/**
+ * Vertical world size of the orthographic export frustum before zoom.
+ *
+ * The capture camera and the fit solve must agree on this or solved zooms
+ * land at the wrong scale.
+ */
+export const ORTHOGRAPHIC_FRUSTUM_SIZE = 10;
+
 export const DEFAULT_ORTHOGRAPHIC_CAMERA: CameraComponent = {
   type: "orthographic" as CameraType,
-  zoom: 50,
+  zoom: 1,
   near: 0.1,
   far: 100,
 };
@@ -72,19 +80,32 @@ export const useCamerasStore = create<CamerasState & CamerasActions>()(
 
         setCameraType: (uuid, type) =>
           set((state) => {
-            const defaults =
+            const current = state.cameras[uuid];
+            if (!current) return state;
+            if (current.type === type) return state;
+
+            const nextCamera: CameraComponent =
               type === "orthographic"
-                ? DEFAULT_ORTHOGRAPHIC_CAMERA
-                : DEFAULT_PERSPECTIVE_CAMERA;
+                ? {
+                    type: "orthographic",
+                    near: current.near,
+                    far: current.far,
+                    zoom:
+                      current.zoom ?? DEFAULT_ORTHOGRAPHIC_CAMERA.zoom,
+                    fov: current.fov,
+                  }
+                : {
+                    type: "perspective",
+                    near: current.near,
+                    far: current.far,
+                    fov: current.fov ?? DEFAULT_PERSPECTIVE_CAMERA.fov,
+                    zoom: current.zoom,
+                  };
 
             return {
               cameras: {
                 ...state.cameras,
-                [uuid]: {
-                  ...defaults,
-                  ...state.cameras[uuid],
-                  type,
-                },
+                [uuid]: nextCamera,
               },
             };
           }),

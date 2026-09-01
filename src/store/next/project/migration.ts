@@ -1,6 +1,8 @@
-import { type ProjectSnapshot_v4, CURRENT_VERSION } from "@/types/project";
+import type { ProjectSnapshot } from "@/types/project";
+import type { ProjectSnapshotVersion } from "@/types/project";
+import { CURRENT_VERSION } from "@/types/project";
 
-type RawSnapshot = Record<string, unknown> & { version: number };
+export type RawSnapshot = Record<string, unknown> & { version: number };
 
 // Add a migration function here for each version bump
 const migrations: Record<number, (old: RawSnapshot) => RawSnapshot> = {
@@ -49,10 +51,68 @@ const migrations: Record<number, (old: RawSnapshot) => RawSnapshot> = {
           }
         : old.models,
   }),
+  5: (old) => ({
+    ...old,
+    version: 5,
+    models:
+      typeof old.models === "object" && old.models !== null
+        ? {
+            ...old.models,
+            hiddenAnimations:
+              (old.models as { hiddenAnimations?: Record<string, string[]> })
+                .hiddenAnimations ?? {},
+          }
+        : old.models,
+  }),
+  6: (old) => ({
+    ...old,
+    version: 6,
+    spritePostprocess: old.spritePostprocess ?? {
+      enabled: false,
+      effects: [],
+      selectedRow: 0,
+      selectedFrame: 0,
+      compareBeforeAfter: false,
+    },
+  }),
+  7: (old) => ({
+    ...old,
+    version: 7,
+    models:
+      typeof old.models === "object" && old.models !== null
+        ? {
+            ...old.models,
+            animationRenames:
+              (
+                old.models as {
+                  animationRenames?: Record<string, Record<string, string>>;
+                }
+              ).animationRenames ?? {},
+          }
+        : old.models,
+  }),
+  8: (old) => ({
+    ...old,
+    version: 8,
+    models:
+      typeof old.models === "object" && old.models !== null
+        ? {
+            ...old.models,
+            importedClips:
+              (
+                old.models as {
+                  importedClips?: Record<string, Record<string, unknown>>;
+                }
+              ).importedClips ?? {},
+          }
+        : old.models,
+  }),
 };
 
-export function migrateSnapshot(raw: RawSnapshot): ProjectSnapshot_v4 {
-  let current = raw;
+export function migrateSnapshot(
+  raw: ProjectSnapshotVersion | RawSnapshot,
+): ProjectSnapshot {
+  let current = raw as RawSnapshot;
   const target = CURRENT_VERSION;
 
   for (let v = current.version; v < target; v++) {
@@ -61,5 +121,5 @@ export function migrateSnapshot(raw: RawSnapshot): ProjectSnapshot_v4 {
     current = migrate(current);
   }
 
-  return current as unknown as ProjectSnapshot_v4;
+  return current as unknown as ProjectSnapshot;
 }

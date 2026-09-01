@@ -1,6 +1,8 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   CameraControls,
+  OrthographicCamera,
+  PerspectiveCamera,
   GizmoHelper,
   GizmoViewport,
   Grid,
@@ -16,6 +18,12 @@ import { useModelsStore } from "@/store/next/models";
 import { useModelDowngradesStore } from "@/store/next/model-downgrades";
 import { getRuntimeModel } from "@/utils/model-downgrade-runtime";
 import { normalizeWorkflowDegrees } from "@/utils/workflow-camera";
+import {
+  buildPlaybackClip,
+  getAnimationClipFps,
+  makeInPlaceClip,
+  type InPlaceAxisModeInput,
+} from "@/utils/animation-clips";
 import type { ResolvedWorkflowCamera } from "@/utils/workflow-camera";
 import type {
   AmbientLightComponent,
@@ -29,6 +37,12 @@ import type {
 type WorkflowCameraPreviewProps = {
   camera: ResolvedWorkflowCamera;
   selectedDirection: string;
+  selectedAnimation?: {
+    modelUuid?: string;
+    animationName?: string;
+    forceAnimationsInPlace?: boolean;
+    forceAnimationsInPlaceMode?: InPlaceAxisModeInput;
+  };
   onCameraChange: (camera: {
     distance: number;
     phi: number;
@@ -45,15 +59,36 @@ function transformProps(transform?: Transform) {
   };
 }
 
-function PreviewModel({ uuid }: { uuid: string }) {
+function PreviewModel({
+  uuid,
+  selectedAnimation,
+}: {
+  uuid: string;
+  selectedAnimation?: {
+    modelUuid?: string;
+    animationName?: string;
+    forceAnimationsInPlace?: boolean;
+    forceAnimationsInPlaceMode?: InPlaceAxisModeInput;
+  };
+}) {
+  const clips = useModelsStore((state) => state.clips);
+  const durations = useModelsStore((state) => state.durations);
+  const speeds = useModelsStore((state) => state.speeds);
+  const loops = useModelsStore((state) => state.loops);
   const transform = useTransformsStore((state) => state.transforms[uuid]);
+  const modelClips = useModelsStore((state) => state.clips[uuid]);
+  const modelDurations = durations[uuid] ?? {};
+  const modelSpeeds = speeds[uuid] ?? {};
+  const modelLoops = loops[uuid] ?? {};
   const activeVariant = useModelDowngradesStore(
     (state) => state.entries[uuid]?.activeVariant ?? "original",
   );
   const downgradeRevision = useModelDowngradesStore(
     (state) => state.entries[uuid]?.revision ?? 0,
   );
-  const clipsRevision = useModelsStore((state) => state.clips[uuid]?.length ?? 0);
+  const clipsRevision = useModelsStore(
+    (state) => state.clips[uuid]?.length ?? 0,
+  );
   const runtimeRefreshKey = `${activeVariant}:${downgradeRevision}:${clipsRevision}`;
   const object = useMemo(() => {
     if (runtimeRefreshKey.length === 0) return null;
@@ -65,6 +100,96 @@ function PreviewModel({ uuid }: { uuid: string }) {
     });
     return cloned;
   }, [activeVariant, runtimeRefreshKey, uuid]);
+  const previewAnimation =
+    selectedAnimation?.modelUuid && selectedAnimation.modelUuid === uuid
+      ? selectedAnimation
+      : undefined;
+  const modelRef = useRef<THREE.AnimationMixer | null>(null);
+
+  useFrame((_, delta) => {
+    modelRef.current?.update(delta);
+  });
+
+  useEffect(() => {
+    if (!object) {
+      if (modelRef.current) {
+        modelRef.current.stopAllAction();
+      }
+      modelRef.current = null;
+      return;
+    }
+
+    modelRef.current = new THREE.AnimationMixer(object);
+
+    return () => {
+      modelRef.current?.stopAllAction();
+      modelRef.current = null;
+    };
+  }, [object]);
+
+  useEffect(() => {
+    const mixer = modelRef.current;
+    if (!mixer) return;
+    mixer.stopAllAction();
+    mixer.setTime(0);
+
+    if (
+      !previewAnimation?.animationName ||
+      previewAnimation.animationName === "none"
+    ) {
+      return;
+    }
+
+    const animationName = previewAnimation.animationName;
+    const clipRef = modelClips?.find(
+      (entry) => entry.clip.name === animationName,
+    );
+    if (!clipRef) return;
+
+    const playbackClip = previewAnimation.forceAnimationsInPlace
+      ? makeInPlaceClip(
+          clipRef.clip,
+          previewAnimation.forceAnimationsInPlaceMode,
+        )
+      : clipRef.clip;
+
+    const [trimStart, trimEnd] = modelDurations[animationName] ?? [
+      0,
+      clipRef.clip.duration,
+    ];
+    const fps = getAnimationClipFps(playbackClip);
+    const { clip, generated } = buildPlaybackClip(
+      playbackClip,
+      trimStart,
+      trimEnd,
+      fps,
+    );
+    const action = mixer.clipAction(clip);
+    const speed = modelSpeeds[animationName] ?? 1;
+    const loop = modelLoops[animationName] ?? THREE.LoopOnce;
+
+    action.setDuration((1 / speed) * clip.duration);
+    action.setLoop(loop, Infinity);
+    action.play();
+
+    return () => {
+      action.stop();
+      if (generated) {
+        mixer.uncacheAction(clip);
+        mixer.uncacheClip(clip);
+      }
+    };
+  }, [
+    clips,
+    modelClips,
+    modelDurations,
+    modelLoops,
+    modelSpeeds,
+    previewAnimation?.animationName,
+    previewAnimation?.modelUuid,
+    previewAnimation?.forceAnimationsInPlace,
+    previewAnimation?.forceAnimationsInPlaceMode,
+  ]);
 
   if (!object) return null;
 
@@ -134,7 +259,11 @@ function PreviewLight({
   return null;
 }
 
-function PreviewSceneObjects() {
+function PreviewSceneObjects({
+  selectedAnimation,
+}: {
+  selectedAnimation?: WorkflowCameraPreviewProps["selectedAnimation"];
+}) {
   const entities = useEntitiesStore((state) => state.entities);
   const lights = useLightsStore((state) => state.lights);
   const isVisible = (entity: unknown) =>
@@ -149,7 +278,19 @@ function PreviewSceneObjects() {
   return (
     <>
       {modelEntities.map((entity) => (
-        <PreviewModel key={entity.uuid} uuid={entity.uuid} />
+        <PreviewModel
+          key={entity.uuid}
+          uuid={entity.uuid}
+          selectedAnimation={
+            selectedAnimation?.modelUuid === entity.uuid
+              ? {
+                  ...selectedAnimation,
+                  forceAnimationsInPlace:
+                    selectedAnimation?.forceAnimationsInPlace ?? false,
+                }
+              : undefined
+          }
+        />
       ))}
       {lightEntities.map((entity) => {
         const light = lights[entity.uuid];
@@ -173,18 +314,52 @@ function PreviewCameraControls({
 }: Pick<WorkflowCameraPreviewProps, "camera" | "onCameraChange">) {
   const controlsRef = useRef<CameraControls>(null);
   const { camera: threeCamera } = useThree();
+  const viewportWidth = useThree((state) => state.size.width);
+  const viewportHeight = useThree((state) => state.size.height);
+  const cameraViewportKey = `${Math.round(viewportWidth)}x${Math.round(viewportHeight)}`;
 
   useEffect(() => {
     threeCamera.position.set(...camera.position);
-    controlsRef.current?.setLookAt(
-      ...camera.position,
-      ...camera.target,
-      false,
-    );
+    controlsRef.current?.setLookAt(...camera.position, ...camera.target, false);
   }, [camera.position, camera.target, threeCamera]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const aspect =
+      viewportWidth > 0 && viewportHeight > 0
+        ? viewportWidth / viewportHeight
+        : 0;
+
+    if (
+      camera.cameraType === "orthographic" &&
+      threeCamera instanceof THREE.OrthographicCamera &&
+      aspect > 0
+    ) {
+      threeCamera.left = (-ORTHOGRAPHIC_SIZE * aspect) / 2;
+      threeCamera.right = (ORTHOGRAPHIC_SIZE * aspect) / 2;
+      threeCamera.top = ORTHOGRAPHIC_SIZE / 2;
+      threeCamera.bottom = -ORTHOGRAPHIC_SIZE / 2;
+      const zoom = camera.zoom ?? 1;
+      threeCamera.zoom = zoom;
+      threeCamera.updateProjectionMatrix();
+      threeCamera.updateMatrixWorld();
+      controls.zoomTo(zoom, false);
+    }
+
+    controls.update(0);
+  }, [
+    camera.cameraType,
+    camera.zoom,
+    viewportWidth,
+    viewportHeight,
+    threeCamera,
+  ]);
 
   return (
     <CameraControls
+      key={`workflow-camera-controls-${camera.cameraType}-${cameraViewportKey}`}
       ref={controlsRef}
       makeDefault
       minDistance={0.1}
@@ -195,8 +370,13 @@ function PreviewCameraControls({
         const controlledCamera = controls.camera;
         const offset = controlledCamera.position.clone().sub(target);
         const spherical = new THREE.Spherical().setFromVector3(offset);
+        const distance =
+          controlledCamera instanceof THREE.OrthographicCamera
+            ? controlledCamera.zoom
+            : spherical.radius;
+
         onCameraChange({
-          distance: Number(spherical.radius.toFixed(3)),
+          distance: Number(distance.toFixed(3)),
           phi: Number(THREE.MathUtils.radToDeg(spherical.phi).toFixed(2)),
           theta: normalizeWorkflowDegrees(
             Number(THREE.MathUtils.radToDeg(spherical.theta).toFixed(2)),
@@ -257,32 +437,68 @@ function TargetHandle({
   );
 }
 
+const ORTHOGRAPHIC_SIZE = 10;
+
+function CameraFromMode({ camera }: { camera: ResolvedWorkflowCamera }) {
+  const viewportWidth = useThree((state) => state.size.width);
+  const viewportHeight = useThree((state) => state.size.height);
+  const aspect =
+    viewportWidth > 0 && viewportHeight > 0
+      ? viewportWidth / viewportHeight
+      : 0;
+  const cameraKey = `${Math.round(viewportWidth)}x${Math.round(viewportHeight)}`;
+
+  if (camera.cameraType === "orthographic") {
+    return (
+      <OrthographicCamera
+        makeDefault
+        key={`workflow-preview-orthographic-${cameraKey}`}
+        position={camera.position}
+        near={0.01}
+        far={1000}
+        left={(-ORTHOGRAPHIC_SIZE * aspect) / 2}
+        right={(ORTHOGRAPHIC_SIZE * aspect) / 2}
+        top={ORTHOGRAPHIC_SIZE / 2}
+        bottom={-ORTHOGRAPHIC_SIZE / 2}
+        zoom={camera.zoom ?? 1}
+      />
+    );
+  }
+
+  return (
+    <PerspectiveCamera
+      makeDefault
+      key="workflow-preview-perspective"
+      position={camera.position}
+      fov={45}
+      near={0.01}
+      far={1000}
+    />
+  );
+}
+
 export function WorkflowCameraPreview({
   camera,
   selectedDirection,
+  selectedAnimation,
   onCameraChange,
   onTargetChange,
 }: WorkflowCameraPreviewProps) {
   return (
     <div
-      className="relative h-[360px] overflow-hidden rounded-md border bg-muted/20"
+      className="relative h-[420px] min-h-[420px] shrink-0 overflow-hidden rounded-md border bg-muted/20"
       data-testid="workflow-camera-preview"
     >
-      <Canvas
-        camera={{
-          position: camera.position,
-          fov: 45,
-          near: 0.01,
-          far: 1000,
-        }}
-        gl={{ antialias: false, alpha: true }}
-      >
+      <Canvas gl={{ antialias: false, alpha: true }}>
         <color attach="background" args={["#18181b"]} />
+        <CameraFromMode camera={camera} />
         <PreviewCameraControls
           camera={camera}
           onCameraChange={onCameraChange}
         />
-        <PreviewSceneObjects />
+        <PreviewSceneObjects
+          selectedAnimation={selectedAnimation}
+        />
         <TargetHandle target={camera.target} onTargetChange={onTargetChange} />
         <Grid
           args={[10, 10]}
@@ -298,6 +514,9 @@ export function WorkflowCameraPreview({
       </Canvas>
       <div className="pointer-events-none absolute left-3 top-3 rounded-md border bg-background/85 px-2 py-1 text-xs">
         Previewing {selectedDirection}
+        {selectedAnimation?.animationName
+          ? ` · ${selectedAnimation.animationName}`
+          : ""}
       </div>
       <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-background/85 px-2 py-1 text-[11px] text-muted-foreground">
         Orbit to adjust camera · drag target to reframe

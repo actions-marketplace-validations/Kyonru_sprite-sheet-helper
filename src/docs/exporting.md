@@ -46,7 +46,7 @@ In the workbench you can control:
 Atlas settings are chosen in the preflight modal and remembered as last-used settings.
 
 - **Rows / compatible** — Preserves the existing animation row order and frame order. With default atlas settings this matches the old single-page layout.
-- **Packed / production** — Uses deterministic packing without frame rotation to reduce wasted space. Metadata still preserves the original animation and frame order.
+- **Packed / production** — Uses deterministic packing without frame rotation to reduce wasted space. The page width is searched rather than guessed, so a sheet of equal-sized frames comes out as a full grid with no waste, and mixed sizes are shelved and then squeezed with MaxRects. Among layouts of near-equal area the squarer page wins, so you get `576×640` rather than a `160×704` strip. Metadata still preserves the original animation and frame order.
 - **Padding** — Adds empty pixels around each frame slot.
 - **Extrude** — Duplicates frame edge pixels around the content rect to reduce texture sampling artifacts.
 - **Scale** — Scales atlas frame dimensions for export. The preflight modal includes `1x`, `2x`, and `4x` presets plus a custom numeric value.
@@ -55,7 +55,40 @@ Atlas settings are chosen in the preflight modal and remembered as last-used set
 
 Multi-page output is fully supported by the generic Sprite Sheet format. Engine exporters currently block multi-page atlases because their generated helper code expects one texture page. Increase the max atlas size, disable multi-page, or export generic Sprite Sheet when a validation warning reports that an engine format cannot safely export the plan.
 
-Atlas-style exports also include `spritesheet.manifest.json`, a shared metadata file with atlas options, pages, animation names, frame rects, slot rects, normal-map references, source dimensions, and exporter id. Existing exporter-specific JSON files remain unchanged for compatibility.
+Atlas-style exports also include `spritesheet.manifest.json`, a shared metadata file with atlas options, pages, animation names, frame rects, slot rects, normal-map references, source dimensions, exporter id, and the sheet it belongs to. Existing exporter-specific JSON files remain unchanged for compatibility.
+
+## Sheets
+
+Every sequence belongs to a **sheet**, and each sheet is packed and written as its own spritesheet. Until you assign one, every sequence is on the default sheet and the export is exactly what it has always been: `spritesheet.png`, `spritesheet.json`, `spritesheet.manifest.json`.
+
+Assign a sheet from the sequence row in the Capture stage, or from the **Sheets** section of the preflight modal, where the list is grouped by sheet and clicking a sheet header shows that atlas in the map above.
+
+Once more than one sheet is in use, every format writes each sheet separately:
+
+- **Sprite Sheet / engine formats** — one atlas page, JSON and manifest per sheet, named after it (`hero.png`, `hero.json`, `hero.manifest.json`).
+- **Generated code** — one module per sheet (`hero.lua`, `hero.py`, `hero_phaser.ts`, `src/hero.rs`, `hero.h`). Where a language shares one global namespace, the sheet name is carried into the symbols so the files can be used together: Godot gets `class_name HeroHelper`, Unity `class HeroAnimator`, and raylib prefixed types and functions (`HeroAnimation`, `UpdateHeroAnimation`, `HERO_SPRITESHEET_H`). The single example file (`main.lua`, `main.c`, `example.ts`, `src/main.rs`) loads every sheet and animates the first.
+- **Images (ZIP) and GIF (ZIP)** — frames and GIFs are nested under a folder per sheet.
+
+Sheet names are used as filenames, so characters a path cannot carry are replaced with `-`. Two names that reduce to the same filename stay separate sheets; the second gets a numbered stem.
+
+Each sheet is packed on its own, so max atlas size, multi-page limits and validation are evaluated per sheet — splitting a large capture into sheets is a way to stay under an engine's single-page limit.
+
+## Spritesheet Postprocess
+
+The Export Workbench includes a collapsible **Spritesheet Postprocess** section for 2D effects that run after capture but before atlas packing. This is separate from the viewport Effects stack: viewport effects shape the 3D render, while spritesheet postprocess edits the captured 2D frames before they become atlas pages.
+
+Available export-time 2D effects:
+
+- **Outer Outline** — Adds an alpha-based outline around each sprite. Use **Smooth** for softer strokes or **Crisp Pixel** for nearest-pixel style outlines.
+- **Drop Shadow** — Adds a 2D shadow using offset, blur, spread, color, and opacity.
+- **Glow** — Expands a colored glow from the sprite alpha.
+- **Color Adjust** — Applies brightness, contrast, and saturation tweaks to color frames.
+
+Effects are ordered and can be enabled, disabled, reordered, or removed. When postprocess is disabled, exports use the captured frames unchanged.
+
+The animated preview shows the processed sequence. Turn on **Before / After** to compare original and processed frames with a draggable divider. The zoom buttons in the preview are inspection-only and do not affect exported pixel dimensions.
+
+Outline, shadow, and glow can expand each frame with transparent padding so the added pixels are not clipped. This means the sprite may appear smaller inside its frame because the exported frame is larger. The JSON and manifest frame sizes reflect the processed dimensions.
 
 ## Normal Map Exports
 
@@ -63,15 +96,18 @@ When **Capture normal maps** is enabled, atlas-style exports include matching no
 
 Normal maps are captured at frame creation time. Existing color-only frames do not gain real normal data just by turning the option on later; they export as transparent placeholder normal frames until you recapture or add them again with normal capture enabled.
 
+Spritesheet postprocess effects apply to color frames only. Normal-map frames are padded to match processed color frame dimensions when needed, but their normal data is not outlined, shadowed, glowed, or color-adjusted.
+
 The preflight modal reports normal-map coverage as Ready, Partial, or Missing. Partial and missing normal coverage does not block export because placeholder pages can still preserve the atlas layout.
 
 ## Export History
 
-The workbench stores recent successful exports in browser local storage. History records the format, filename/download intent, frame count, animation count, page count, normal status, atlas settings, and warnings. It does not modify project files and browser exports do not record a real filesystem path.
+The workbench stores recent successful exports in browser local storage. History records the format, filename/download intent, frame count, animation count, page count, normal status, atlas settings, and warnings. It does not modify project files and browser exports do not record a real filesystem path. The **Recent Exports** section is collapsible so it can stay out of the way while configuring captures.
 
 ## Tips
 
 - Use `.glb` models for best animation compatibility.
 - Export at power-of-two frame sizes (64, 128, 256, 512) for best GPU texture performance.
 - Use Packed layout for production atlases with uneven sequence lengths.
+- Use Spritesheet Postprocess for clean 2D outlines or shadows after capture, especially when a 3D outline effect is too noisy.
 - The **Sprite Sheet** format is the most universal — all game engines can load a PNG + JSON atlas.

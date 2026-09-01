@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ResizablePanel } from "@/components/ui/resizable";
+import { SequenceTile } from "@/components/export-workbench/sequence-tile";
 import { GripHorizontalIcon, RotateCcwIcon } from "lucide-react";
 import { useEntitiesStore } from "@/store/next/entities";
-import { useCamerasStore } from "@/store/next/cameras";
+import {
+  ORTHOGRAPHIC_FRUSTUM_SIZE,
+  useCamerasStore,
+} from "@/store/next/cameras";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   OrbitControls,
   PerspectiveCamera,
+  OrthographicCamera,
   Grid,
   GizmoHelper,
   GizmoViewport,
@@ -30,7 +35,11 @@ import { EventType, PubSub } from "@/lib/events";
 import { useTarget } from "@/store/next/targets";
 import { useSettingsStore } from "@/store/next/settings";
 import { Text } from "@react-three/drei";
-import type { PerspectiveCameraComponent, Transform } from "@/types/ecs";
+import type {
+  PerspectiveCameraComponent,
+  OrthographicCameraComponent,
+  Transform,
+} from "@/types/ecs";
 import { setGLContext } from "@/lib/gl-context";
 import { useHistoryStore } from "@/store/next/history";
 import { setAppTitle } from "@/utils/app.web";
@@ -76,7 +85,7 @@ function clampFloatingPreviewPosition(
 function CameraLabel({
   cameraRef,
 }: {
-  cameraRef: React.RefObject<THREE.PerspectiveCamera>;
+  cameraRef: React.RefObject<THREE.Camera | null>;
 }) {
   const [pos, setPos] = useState<[number, number, number]>([0, 0, 0]);
 
@@ -111,17 +120,38 @@ function CameraLabel({
 function SharedScene({
   cameraRef,
 }: {
-  cameraRef?: React.RefObject<THREE.PerspectiveCamera | null>;
+  cameraRef?: React.RefObject<THREE.Camera | null>;
 }) {
   const entities = useEntitiesStore((state) => state.entities);
+  const cameraUUID = useCamerasStore((state) => state.mainCamera);
+  const camera = useCamerasStore((state) =>
+    cameraUUID ? state.cameras[cameraUUID] : undefined,
+  );
+  const isOrthographic = camera?.type === "orthographic";
 
   return (
     <>
       {Object.values(entities).map((entity) => (
         <EntityComponent key={entity.uuid} uuid={entity.uuid} />
       ))}
-      {cameraRef && (
-        <PerspectiveCamera ref={cameraRef} position={[5, 5, 5]} fov={45} />
+      {cameraRef && camera && (
+        isOrthographic ? (
+          <OrthographicCamera
+            ref={cameraRef as React.RefObject<THREE.OrthographicCamera>}
+            position={[5, 5, 5]}
+            near={camera.near}
+            far={camera.far}
+            zoom={(camera as OrthographicCameraComponent).zoom}
+          />
+        ) : (
+          <PerspectiveCamera
+            ref={cameraRef as React.RefObject<THREE.PerspectiveCamera>}
+            position={[5, 5, 5]}
+            near={camera.near}
+            far={camera.far}
+            fov={(camera as PerspectiveCameraComponent).fov}
+          />
+        )
       )}
     </>
   );
@@ -170,12 +200,27 @@ function SyncCameraFromStore({
 
   useEffect(() => {
     if (!cameraValues || !controlsRef.current) return;
-    const camera = controlsRef.current.camera as THREE.PerspectiveCamera;
-    const values = cameraValues as PerspectiveCameraComponent;
+    const camera = controlsRef.current.camera;
 
-    camera.near = values.near;
-    camera.far = values.far;
-    camera.fov = values.fov;
+    if (
+      cameraValues.type === "perspective" &&
+      camera instanceof THREE.PerspectiveCamera
+    ) {
+      const values = cameraValues as PerspectiveCameraComponent;
+      camera.fov = values.fov;
+      camera.near = values.near;
+      camera.far = values.far;
+    }
+
+    if (
+      cameraValues.type === "orthographic" &&
+      camera instanceof THREE.OrthographicCamera
+    ) {
+      const values = cameraValues as OrthographicCameraComponent;
+      camera.zoom = values.zoom;
+      camera.near = values.near;
+      camera.far = values.far;
+    }
     camera.updateProjectionMatrix();
   }, [cameraValues, controlsRef]);
 
@@ -191,11 +236,13 @@ function SyncCameraFromStore({
     const changeCamera = ({
       position,
       target = [0, 0, 0],
+      immediate = false,
     }: {
       position: [number, number, number];
       target?: [number, number, number];
+      immediate?: boolean;
     }) => {
-      controlsRef.current?.setLookAt(...position, ...target, true);
+      controlsRef.current?.setLookAt(...position, ...target, !immediate);
     };
 
     const rotateCamera = ({
@@ -240,7 +287,7 @@ function SyncEditorCameraFromStore({
   isDragging,
   sharedCameraState,
 }: {
-  cameraRef: React.RefObject<THREE.PerspectiveCamera | null>;
+  cameraRef: React.RefObject<THREE.Camera | null>;
   isDragging: React.RefObject<boolean>;
   sharedCameraState: SharedCameraState;
 }) {
@@ -261,7 +308,7 @@ function EditorScene({
   isDragging: React.RefObject<boolean>;
   sharedCameraState: SharedCameraState;
 }) {
-  const camera2Ref = useRef<THREE.PerspectiveCamera>(null!);
+  const camera2Ref = useRef<THREE.Camera>(null!);
   const cameraHelper = useHelper(camera2Ref, THREE.CameraHelper);
   const selected = useEntitiesStore((state) => state.selected);
   const camera = useCamerasStore((state) => state.mainCamera);
@@ -306,11 +353,25 @@ function EditorScene({
 
   useEffect(() => {
     if (!cameraHelper.current || !camera2Ref.current || !cameraValues) return;
-    const cam = camera2Ref.current as THREE.PerspectiveCamera;
-    cam.near = cameraValues.near;
-    cam.far = cameraValues.far;
-    cam.fov = (cameraValues as PerspectiveCameraComponent).fov;
-    cam.updateProjectionMatrix();
+    const cam = camera2Ref.current;
+    if (
+      cameraValues.type === "perspective" &&
+      cam instanceof THREE.PerspectiveCamera
+    ) {
+      cam.near = cameraValues.near;
+      cam.far = cameraValues.far;
+      cam.fov = (cameraValues as PerspectiveCameraComponent).fov;
+      cam.updateProjectionMatrix();
+    } else if (
+      cameraValues.type === "orthographic" &&
+      cam instanceof THREE.OrthographicCamera
+    ) {
+      cam.near = cameraValues.near;
+      cam.far = cameraValues.far;
+      cam.zoom = (cameraValues as OrthographicCameraComponent).zoom;
+      cam.updateProjectionMatrix();
+    }
+
     cameraHelper.current.update();
   }, [cameraValues, cameraHelper]);
 
@@ -408,10 +469,15 @@ const CameraManager = () => {
     if (!cameraValues || !cameraTransform) return;
 
     const aspect = exportWidth / exportHeight;
-    const fov = (cameraValues as PerspectiveCameraComponent).fov;
+    const rotation = new THREE.Euler(
+      ...(cameraTransform.rotation as [number, number, number]),
+    );
+    const orientation = new THREE.Quaternion().setFromEuler(rotation);
     const near = cameraValues.near;
     const far = cameraValues.far;
-    const orthoSize = 10;
+    const orthoSize = ORTHOGRAPHIC_FRUSTUM_SIZE;
+    const fov = (cameraValues as PerspectiveCameraComponent).fov;
+    const zoom = (cameraValues as OrthographicCameraComponent).zoom;
 
     // Create camera instances
     const perspectiveCamera = new THREE.PerspectiveCamera(
@@ -425,6 +491,7 @@ const CameraManager = () => {
       cameraTransform.position[1],
       cameraTransform.position[2],
     );
+    perspectiveCamera.quaternion.copy(orientation);
 
     const orthographicCamera = new THREE.OrthographicCamera(
       (orthoSize * aspect) / -2, // left
@@ -439,8 +506,11 @@ const CameraManager = () => {
       cameraTransform.position[1],
       cameraTransform.position[2],
     );
-    // Copy position and orientation from the perspective camera
-    orthographicCamera.quaternion.copy(perspectiveCamera.quaternion);
+    orthographicCamera.quaternion.copy(orientation);
+    orthographicCamera.zoom = zoom;
+    orthographicCamera.near = near;
+    orthographicCamera.far = far;
+    orthographicCamera.updateProjectionMatrix();
 
     // Determine the next camera based on the prop
     const nextCamera =
@@ -460,7 +530,7 @@ const CameraManager = () => {
       cameraHelper.update();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraType]);
+  }, [cameraType, cameraValues, cameraTransform, exportWidth, exportHeight]);
   return null;
 };
 
@@ -666,10 +736,16 @@ function AssetCreation() {
   }, [isDirty, name]);
 
   return (
-    <ResizablePanel>
+    <ResizablePanel className="min-h-0">
+      {/*
+        Centre column: the scene view, and the sequence beneath it. Both are
+        viewing surfaces, so they sit together — the rail beside them is for
+        deciding, not for watching.
+      */}
+      <div className="flex h-full min-h-0 flex-col gap-2">
       <div
         ref={previewHostRef}
-        className="relative h-full w-full overflow-hidden"
+        className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-stroke bg-card"
       >
         <EntityContextProvider isPreview={false}>
           <Canvas
@@ -689,7 +765,7 @@ function AssetCreation() {
 
         <section
           ref={previewPanelRef}
-          className="absolute z-20 flex min-h-56 min-w-80 resize flex-col overflow-hidden rounded-md border bg-background/95 shadow-xl backdrop-blur"
+          className="absolute z-20 flex min-h-56 min-w-80 resize flex-col overflow-hidden rounded-lg border border-stroke bg-surface-high"
           style={
             previewPosition
               ? {
@@ -707,15 +783,15 @@ function AssetCreation() {
           }
         >
           <div
-            className="flex h-10 shrink-0 cursor-grab select-none items-center gap-2 border-b px-2 active:cursor-grabbing"
+            className="flex h-9 shrink-0 cursor-grab select-none items-center gap-2 border-b border-stroke px-2 active:cursor-grabbing"
             onPointerDown={handlePreviewDragStart}
             onPointerMove={handlePreviewDragMove}
             onPointerUp={handlePreviewDragEnd}
             onPointerCancel={handlePreviewDragEnd}
           >
             <GripHorizontalIcon className="size-4 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              Preview Canvas
+            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Preview
             </span>
             <button
               type="button"
@@ -751,7 +827,7 @@ function AssetCreation() {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto bg-black/20 p-3">
+          <div className="checkerboard min-h-0 flex-1 overflow-auto p-3">
             <div className="flex min-h-full min-w-full items-center justify-center">
               <EntityContextProvider isPreview={true}>
                 <Canvas
@@ -766,7 +842,7 @@ function AssetCreation() {
                     gl.setClearColor("#000000", 0);
                   }}
                   gl={{ antialias: false, preserveDrawingBuffer: true }}
-                  className="rendering-[pixelated] border-2 border-accent-800"
+                  className="rendering-[pixelated] border border-stroke-strong"
                 >
                   <PreviewScene
                     isDragging={isDragging}
@@ -778,6 +854,9 @@ function AssetCreation() {
             </div>
           </div>
         </section>
+      </div>
+
+        <SequenceTile />
       </div>
     </ResizablePanel>
   );

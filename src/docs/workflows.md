@@ -25,6 +25,40 @@ The app will automatically rotate the model to each required angle, play through
 
 Before each sequence, the workflow waits for the animation state to apply, moves the camera, lets the render view settle, then starts frame capture. You can cancel a running workflow; the active sequence capture is stopped before the workflow exits.
 
+## Workflow Camera Settings
+
+Workflows use a camera draft that can be previewed before capture. Configure these settings in the workflow panel:
+
+- **Camera type** — Perspective or Orthographic. The preview and final workflow capture use the selected type.
+- **Distance / zoom** — Controls framing for the selected camera type.
+- **Elevation** — Vertical camera angle for the preset or selected direction.
+- **Direction / rotation offset** — Rotates the preset directions when you need a different facing convention.
+- **Target** — The world-space point the camera frames.
+
+Changing camera type updates the workflow preview, so you can compare perspective and orthographic output before running the capture.
+
+## Animation Selection
+
+The workflow animation list controls which clips generate rows. Animations that are toggled off are skipped and do not create output rows when the workflow runs.
+
+Use this list to hide noisy test clips, duplicate imports, or animations that should not be part of a production atlas. Hidden or disabled clips remain in the model; they are just excluded from workflow generation.
+
+## Force Animation In Place
+
+Use **Force animation in place** when root motion would move the character through the frame during capture. This is helpful for walk/run cycles that should loop in place for game sprites.
+
+The setting is part of workflow animation settings, so it applies to workflow capture and preview without changing the original model file.
+
+## Auto-Fit Framing
+
+A workflow can solve its own framing instead of using the camera distance you dialled in. Before capturing, it measures every animation across its clip, projects the result through each direction's camera, and picks one distance and target that keep the widest pose inside a margin you choose.
+
+Run it from the CLI with `--fit auto --margin <px>`, or from the Export Workbench with **Fit camera to animation** for a single sequence.
+
+The panel shows a *Measuring animations for auto-fit* phase before capture starts, and lists any warnings — an animation with no measurable geometry, or a solve that did not settle.
+
+See the [CLI guide](cli.md) for the full option list.
+
 ## Output Structure
 
 Each animation clip is exported with direction labels appended to the clip name. For example, a model with `idle` and `walk` animations run through **Top-Down 8-Dir** produces:
@@ -43,7 +77,7 @@ walk_NE
 ...
 ```
 
-These labeled sequences are embedded in the exported JSON/metadata file so your game engine can look them up by name.
+These labeled sequences are embedded in the exported JSON/metadata file so your game engine can look them up by name. Workflow exports also include structured direction metadata: each sequence records its base animation and direction, and `directionalAnimations` groups rows like `walk_N`, `walk_E`, `walk_S`, and `walk_W` under the shared `walk` animation.
 
 ## Tips
 
@@ -52,3 +86,4 @@ These labeled sequences are embedded in the exported JSON/metadata file so your 
 - The **Platformer** workflow captures both Right and Left directions. Use **Platformer Single Side** if your game will mirror the sprite at runtime.
 - Enable **Capture normal maps** before running a workflow if you want every workflow sequence to include real normal map frames.
 - Workflows respect your current lighting and effects settings — configure those first.
+- Toggle off any animation clips you do not want before running the workflow; disabled clips are not exported as rows.

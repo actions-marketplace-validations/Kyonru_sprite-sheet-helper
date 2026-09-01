@@ -1,25 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Infinity as InfinityIcon,
-  Maximize2,
   MoreHorizontal,
   Pause,
+  Layers,
   Pencil,
+  Repeat,
   Play,
   SlidersHorizontal,
   Trash2,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,9 +24,13 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrubField } from "@/components/ui/scrub-field";
+import { SheetPicker } from "@/components/export-workbench/sheet-assignments";
 import { confirm } from "@/components/confirm";
 import { reorderItems } from "@/components/animation-reorder-modal";
 import { useImagesStore } from "@/store/next/images";
+import { DEFAULT_SHEET_NAME, getRowSheetName } from "@/utils/exports/sheets";
+import { captureIntervalFromFps } from "@/utils/exports/helpers";
 import { addDataToImageIfNeeded } from "@/utils/images";
 import {
   getNormalCoverageForRow,
@@ -63,51 +59,6 @@ function NormalStatusBadge({ status }: { status: NormalCoverageStatus }) {
   );
 }
 
-function FrameThumbnail({
-  src,
-  index,
-  selected,
-  onSelect,
-  onRemove,
-  buttonRef,
-}: {
-  src: string;
-  index: number;
-  selected: boolean;
-  onSelect: () => void;
-  onRemove: () => void;
-  buttonRef?: (node: HTMLButtonElement | null) => void;
-}) {
-  return (
-    <div className="group relative size-10 shrink-0">
-      <button
-        ref={buttonRef}
-        type="button"
-        className={cn(
-          "size-10 overflow-hidden rounded-md border bg-muted/40 transition-colors",
-          selected ? "border-primary" : "border-border hover:border-primary/60",
-        )}
-        onClick={onSelect}
-        aria-label={`Select frame ${index + 1}`}
-      >
-        <img
-          className="size-full object-contain"
-          src={addDataToImageIfNeeded(src)}
-          alt={`Frame ${index + 1}`}
-        />
-      </button>
-      <button
-        type="button"
-        className="absolute -right-1 -top-1 hidden size-5 items-center justify-center rounded-full border bg-background text-destructive shadow-sm group-hover:flex"
-        onClick={onRemove}
-        aria-label={`Delete frame ${index + 1}`}
-      >
-        <Trash2 size={12} />
-      </button>
-    </div>
-  );
-}
-
 function SequenceRow({
   row,
   index,
@@ -127,6 +78,14 @@ function SequenceRow({
   const updateFps = useImagesStore((state) => state.updateFps);
   const updateImagesRow = useImagesStore((state) => state.updateImagesRow);
   const normalStatus = getNormalCoverageForRow(row).status;
+  const allRows = useImagesStore((state) => state.images);
+  // Every sheet already in play, so moving a sequence beside its neighbours is
+  // a pick rather than a retype.
+  const sheetNames = useMemo(() => {
+    const names = new Set([DEFAULT_SHEET_NAME]);
+    for (const item of allRows) names.add(getRowSheetName(item));
+    return [...names];
+  }, [allRows]);
 
   return (
     <div className="flex items-center gap-1">
@@ -147,6 +106,11 @@ function SequenceRow({
         </div>
         <NormalStatusBadge status={normalStatus} />
       </button>
+
+      {/* Which spritesheet this sequence is packed into. It sits on the row
+          rather than in the export dialog alone, because the decision is about
+          this sequence, and this is where the sequence is. */}
+      <SheetPicker row={row} sheetNames={sheetNames} />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -300,25 +264,17 @@ function SequenceRow({
 
 export function SequencePreview() {
   const [loop, setLoop] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
   const rows = useImagesStore((state) => state.images);
   const selectedRow = useImagesStore((state) => state.selectedRow);
   const setSelectedRow = useImagesStore((state) => state.setSelectedRow);
+  const setImages = useImagesStore((state) => state.setImages);
+  const updateImagesRow = useImagesStore((state) => state.updateImagesRow);
+  const updateFps = useImagesStore((state) => state.updateFps);
   const removeImagesRow = useImagesStore((state) => state.removeImagesRow);
-  const removeImageFromRow = useImagesStore(
-    (state) => state.removeImageFromRow,
-  );
-  const [open, setOpen] = useState(() => rows.length > 0);
-  const hadRowsRef = useRef(rows.length > 0);
   const thumbnailRefs = useRef<Array<HTMLButtonElement | null>>([]);
-
-  useEffect(() => {
-    if (!hadRowsRef.current && rows.length > 0) {
-      setOpen(true);
-    }
-    hadRowsRef.current = rows.length > 0;
-  }, [rows.length]);
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -331,11 +287,16 @@ export function SequencePreview() {
     ? Math.max(0, Math.min(activeFrameIndex, activeRow.images.length - 1))
     : 0;
   const currentFrame = activeRow?.images[currentFrameIndex];
-  const totalFrames = useMemo(
-    () => rows.reduce((sum, row) => sum + row.images.length, 0),
-    [rows],
-  );
-
+  /*
+    The rate the row plays and exports at. A row can carry 0 or nothing at all
+    from an older project, so the readout falls back to the same 12fps the
+    manifest writes rather than showing a rate no consumer would honour.
+  */
+  const rowFps =
+    activeRow && Number.isFinite(activeRow.fps) && activeRow.fps > 0
+      ? activeRow.fps
+      : 12;
+  const frameIntervalMs = Math.round(captureIntervalFromFps(activeRow?.fps));
   useEffect(() => {
     setPlaying(false);
     setActiveFrameIndex(0);
@@ -352,7 +313,7 @@ export function SequencePreview() {
   useEffect(() => {
     thumbnailRefs.current[currentFrameIndex]?.scrollIntoView({
       block: "nearest",
-      inline: "nearest",
+      inline: "center",
       behavior: playing ? "auto" : "smooth",
     });
   }, [activeRow?.uuid, currentFrameIndex, playing]);
@@ -360,9 +321,13 @@ export function SequencePreview() {
   useEffect(() => {
     if (!playing || !activeRow || activeRow.images.length <= 1) return;
 
+    // Plays at the row's real frame rate — the same number written into the
+    // exported manifest — so the preview is the export. Clamping the rate to a
+    // whole ≥1 fps made every slow sequence play back at 1000ms no matter how
+    // far apart its frames were captured.
     const playbackDelay = Math.max(
       16,
-      Math.round(1000 / Math.max(1, activeRow.fps || 12)),
+      Math.round(captureIntervalFromFps(activeRow.fps)),
     );
     const timeoutId = window.setTimeout(() => {
       setActiveFrameIndex((index) => {
@@ -392,19 +357,16 @@ export function SequencePreview() {
     [removeImagesRow, rows.length, selectedRow, setSelectedRow],
   );
 
-  const removeFrame = useCallback(
-    (frameIndex: number) => {
-      if (!activeRow) return;
-      removeImageFromRow(selectedRow, frameIndex);
-      setActiveFrameIndex((index) => {
-        const nextLength = activeRow.images.length - 1;
-        if (nextLength <= 0) return 0;
-        if (frameIndex < index) return index - 1;
-        return Math.min(index, nextLength - 1);
-      });
-    },
-    [activeRow, removeImageFromRow, selectedRow],
-  );
+  const removeAllRows = useCallback(() => {
+    confirm.delete("all rows", {
+      onConfirm: () => {
+        setImages([]);
+        setSelectedRow(0);
+        setPlaying(false);
+        setActiveFrameIndex(0);
+      },
+    });
+  }, [setImages, setPlaying, setActiveFrameIndex, setSelectedRow]);
 
   const selectPreviousFrame = useCallback(() => {
     if (!activeRow || activeRow.images.length <= 1) return;
@@ -422,208 +384,324 @@ export function SequencePreview() {
     );
   }, [activeRow, loop]);
 
+  /*
+    No wrapper of its own: this sits inside the Capture stage, which already
+    names it and reports its counts. A second header here would restate the
+    stage it belongs to and make the rail look one level deeper than it is.
+  */
   return (
-    <section className="mt-3 rounded-md border">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm font-medium"
-          >
-            <span>Sequence Preview</span>
-            <span className="flex items-center gap-2 text-xs text-muted-foreground">
-              {rows.length} row{rows.length === 1 ? "" : "s"} · {totalFrames}{" "}
-              frame{totalFrames === 1 ? "" : "s"}
-              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </span>
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          {rows.length === 0 ? (
-            <div className="p-3 text-xs text-muted-foreground">
+    <div>
+      {rows.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
               Captured sequences will appear here.
-            </div>
+            </p>
           ) : (
-            <div className="grid gap-3 p-3">
-              <div className="grid max-h-40 gap-1 overflow-auto pr-1">
-                {rows.map((row, index) => (
-                  <SequenceRow
-                    key={row.uuid}
-                    row={row}
-                    index={index}
-                    selected={selectedRow === index}
-                    onSelect={() => setSelectedRow(index)}
-                    onRemove={() => removeRow(index)}
-                  />
-                ))}
+            <div className="grid gap-2.5">
+              {/*
+                Sequences as chips, not a stacked list. The tile sits under the
+                viewport where height is the scarce dimension, and picking which
+                sequence to watch is a one-click choice — a list of expandable
+                rows spends vertical space on editing that most of the time
+                nobody is doing. The editing lives behind "Edit sequence".
+              */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Sequence
+                </span>
+                {rows.map((row, index) => {
+                  const selected = selectedRow === index;
+                  return (
+                    <button
+                      key={row.uuid}
+                      type="button"
+                      onClick={() => setSelectedRow(index)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "flex h-[19px] items-center gap-1.5 rounded-md border px-2 text-[10px] transition-colors",
+                        selected
+                          ? "border-transparent bg-brand-soft font-semibold text-foreground"
+                          : "border-stroke text-muted-foreground hover:bg-row-hover hover:text-foreground",
+                      )}
+                    >
+                      <span className="max-w-28 truncate">{row.label}</span>
+                      <span className="font-mono text-[9px] text-faint-foreground tabular-nums">
+                        {row.images.length}
+                      </span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setLoop((value) => !value)}
+                  aria-pressed={loop}
+                  className={cn(
+                    "ml-auto flex h-[19px] items-center gap-1.5 rounded-md border px-2 text-[10px] font-semibold transition-colors",
+                    loop
+                      ? "border-brand-line bg-brand-soft text-brand"
+                      : "border-stroke text-muted-foreground hover:bg-row-hover hover:text-foreground",
+                  )}
+                >
+                  <Repeat size={10} />
+                  Loop
+                </button>
+                <span className="shrink-0 font-mono text-[10px] text-faint-foreground tabular-nums">
+                  {activeRow && activeRow.images.length > 0
+                    ? `${currentFrameIndex + 1} / ${activeRow.images.length}`
+                    : "0 / 0"}
+                </span>
               </div>
 
-              <div className="relative rounded-md border bg-muted/20">
-                <div className="mx-auto aspect-square w-full max-w-80">
+              {editing && (
+                <div className="grid gap-1.5 rounded-md border border-stroke bg-surface-sunken p-1.5">
+                  <div className="grid max-h-40 gap-1 overflow-auto pr-1">
+                    {rows.map((row, index) => (
+                      <SequenceRow
+                        key={row.uuid}
+                        row={row}
+                        index={index}
+                        selected={selectedRow === index}
+                        onSelect={() => setSelectedRow(index)}
+                        onRemove={() => removeRow(index)}
+                      />
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 w-max justify-self-end px-2 text-[11px]"
+                    onClick={removeAllRows}
+                  >
+                    <Trash2 size={12} />
+                    Delete all rows
+                  </Button>
+                </div>
+              )}
+
+              {/*
+                Transport, laid out as: step · frame · step, then the scrubber
+                and the two edit scopes beside it. The frame reads as a carousel
+                because the steppers flank the frame itself rather than the
+                strip — you are moving through frames, not scrolling a list.
+              */}
+              <div className="flex items-stretch gap-2">
+                <button
+                  type="button"
+                  onClick={selectPreviousFrame}
+                  disabled={(activeRow?.images.length ?? 0) <= 1}
+                  aria-label="Previous frame"
+                  className="grid w-6 shrink-0 place-items-center rounded-md border border-stroke text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground disabled:opacity-40"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+
+                <div className="checkerboard relative size-24 shrink-0 overflow-hidden rounded-md border border-stroke">
                   {currentFrame ? (
                     <TransformWrapper
                       key={activeRow?.uuid}
                       maxScale={50}
                       wheel={{ step: 0.08 }}
+                      doubleClick={{ mode: "reset" }}
                     >
-                      {({ zoomIn, zoomOut, resetTransform }) => (
-                        <>
-                          <div className="absolute left-2 top-2 z-10 flex gap-1">
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="secondary"
-                              className="size-7"
-                              onClick={() => zoomIn()}
-                              aria-label="Zoom in"
-                            >
-                              <ZoomIn size={14} />
-                            </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="secondary"
-                              className="size-7"
-                              onClick={() => zoomOut()}
-                              aria-label="Zoom out"
-                            >
-                              <ZoomOut size={14} />
-                            </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="secondary"
-                              className="size-7"
-                              onClick={() => resetTransform()}
-                              aria-label="Reset zoom"
-                            >
-                              <Maximize2 size={14} />
-                            </Button>
-                          </div>
-                          <div className="absolute right-2 top-2 z-10 flex gap-1">
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant={playing ? "secondary" : "outline"}
-                              className="size-7"
-                              onClick={() => setPlaying((value) => !value)}
-                              disabled={(activeRow?.images.length ?? 0) <= 1}
-                              aria-pressed={playing}
-                              aria-label="Play sequence"
-                            >
-                              {playing ? (
-                                <Pause size={14} />
-                              ) : (
-                                <Play size={14} />
+                      {/* Wheel zooms, drag pans, double-click resets — the
+                          controls are the pointer, so the tile stays a frame
+                          rather than a toolbar. */}
+                      <TransformComponent
+                        wrapperStyle={{ width: "100%", height: "100%" }}
+                        wrapperClass="items-center justify-center"
+                      >
+                        <div
+                          className="relative"
+                          style={{
+                            width: activeRow?.frameWidth,
+                            height: activeRow?.frameHeight,
+                            imageRendering: "pixelated",
+                          }}
+                        >
+                          {activeRow?.images.map((imageSrc, index) => (
+                            <img
+                              key={`${activeRow.uuid}-${index}`}
+                              className={cn(
+                                "absolute inset-0 size-full object-contain",
+                                index === currentFrameIndex
+                                  ? "opacity-100"
+                                  : "pointer-events-none opacity-0",
                               )}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant={loop ? "secondary" : "outline"}
-                              className="size-7"
-                              onClick={() => setLoop((value) => !value)}
-                              aria-pressed={loop}
-                              aria-label="Loop sequence"
-                            >
-                              <InfinityIcon size={14} />
-                            </Button>
-                          </div>
-                          <TransformComponent
-                            wrapperStyle={{
-                              width: "100%",
-                              height: "100%",
-                            }}
-                            wrapperClass="items-center justify-center"
-                          >
-                            <div
-                              className="relative max-h-full max-w-full"
-                              style={{
-                                width: activeRow?.frameWidth,
-                                height: activeRow?.frameHeight,
-                                imageRendering: "pixelated",
-                              }}
-                            >
-                              {activeRow?.images.map((imageSrc, index) => (
-                                <img
-                                  key={`${activeRow.uuid}-${index}`}
-                                  className={cn(
-                                    "absolute inset-0 size-full object-contain",
-                                    index === currentFrameIndex
-                                      ? "opacity-100"
-                                      : "pointer-events-none opacity-0",
-                                  )}
-                                  style={{ imageRendering: "pixelated" }}
-                                  src={addDataToImageIfNeeded(imageSrc)}
-                                  alt={`${activeRow.label} frame ${index + 1}`}
-                                  draggable={false}
-                                />
-                              ))}
-                            </div>
-                          </TransformComponent>
-                        </>
-                      )}
+                              style={{ imageRendering: "pixelated" }}
+                              src={addDataToImageIfNeeded(imageSrc)}
+                              alt={`${activeRow.label} frame ${index + 1}`}
+                              draggable={false}
+                            />
+                          ))}
+                        </div>
+                      </TransformComponent>
                     </TransformWrapper>
                   ) : (
-                    <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
-                      This sequence has no frames.
-                    </div>
+                    <span className="grid size-full place-items-center px-2 text-center text-[10px] text-muted-foreground">
+                      No frames
+                    </span>
+                  )}
+                  {activeRow && activeRow.images.length > 0 && (
+                    <span className="pointer-events-none absolute bottom-0.5 right-1 font-mono text-[9px] text-faint-foreground tabular-nums">
+                      {currentFrameIndex + 1}
+                    </span>
                   )}
                 </div>
-              </div>
 
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1">
-                <Button
+                <button
                   type="button"
-                  size="icon-xs"
-                  variant="outline"
-                  onClick={selectPreviousFrame}
-                  disabled={(activeRow?.images.length ?? 0) <= 1}
-                  aria-label="Previous frame"
-                >
-                  <ChevronLeft size={14} />
-                </Button>
-                <div className="no-scrollbar min-w-0 overflow-x-auto overflow-y-hidden py-1">
-                  <div className="flex w-max gap-1 px-0.5">
-                    {(activeRow?.images ?? []).map((imageSrc, index) => (
-                      <FrameThumbnail
-                        key={index}
-                        buttonRef={(node) => {
-                          thumbnailRefs.current[index] = node;
-                        }}
-                        src={imageSrc}
-                        index={index}
-                        selected={index === currentFrameIndex}
-                        onSelect={() => {
-                          setPlaying(false);
-                          setActiveFrameIndex(index);
-                        }}
-                        onRemove={() => removeFrame(index)}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="outline"
                   onClick={selectNextFrame}
                   disabled={(activeRow?.images.length ?? 0) <= 1}
                   aria-label="Next frame"
+                  className="grid w-6 shrink-0 place-items-center rounded-md border border-stroke text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground disabled:opacity-40"
                 >
-                  <ChevronRight size={14} />
-                </Button>
-              </div>
+                  <ChevronRight size={13} />
+                </button>
 
-              <div className="text-center text-xs text-muted-foreground">
-                {activeRow
-                  ? `Frame ${Math.min(currentFrameIndex + 1, activeRow.images.length)} of ${activeRow.images.length}`
-                  : "No sequence selected"}
+                <div className="grid min-w-0 flex-1 content-start gap-1.5">
+                  {/* min-w-0: a flex item defaults to min-width:auto, which
+                      lets the strip push the row wider than the panel instead
+                      of scrolling inside it. */}
+                  <div className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPlaying((value) => !value)}
+                      disabled={(activeRow?.images.length ?? 0) <= 1}
+                      aria-pressed={playing}
+                      aria-label={playing ? "Pause sequence" : "Play sequence"}
+                      className="grid size-[22px] shrink-0 place-items-center rounded-md border border-stroke bg-surface-highest text-foreground transition-colors hover:bg-surface-high disabled:opacity-40"
+                    >
+                      {playing ? <Pause size={11} /> : <Play size={11} />}
+                    </button>
+                    {/*
+                      The frames themselves, not an abstract scrubber. These
+                      are exactly what gets written into the spritesheet, in
+                      the order it will write them, so the strip doubles as the
+                      export's contents and as the timeline you scrub. The
+                      active frame stays scrolled to the centre while playing.
+                    */}
+                    <div className="no-scrollbar -my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1">
+                      {(activeRow?.images ?? []).map((imageSrc, index) => {
+                        const active = index === currentFrameIndex;
+                        return (
+                          <button
+                            key={index}
+                            type="button"
+                            ref={(node) => {
+                              thumbnailRefs.current[index] = node;
+                            }}
+                            aria-label={`Go to frame ${index + 1}`}
+                            aria-current={active}
+                            title={`Frame ${index + 1}`}
+                            onClick={() => {
+                              setPlaying(false);
+                              setActiveFrameIndex(index);
+                            }}
+                            className={cn(
+                              "checkerboard relative size-9 shrink-0 overflow-hidden rounded-md border transition-colors",
+                              active
+                                ? "border-brand"
+                                : "border-stroke opacity-60 hover:border-stroke-strong hover:opacity-100",
+                            )}
+                          >
+                            <img
+                              src={addDataToImageIfNeeded(imageSrc)}
+                              alt=""
+                              aria-hidden="true"
+                              draggable={false}
+                              className="size-full object-contain"
+                              style={{ imageRendering: "pixelated" }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* The cadence, then two edit scopes — so it is never
+                      ambiguous which one you are about to change: the frame
+                      shown to the left, or the sequence selected above. */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {/*
+                      Playback rate for the selected sequence, stored on the row
+                      itself. The transport above reads the same number, so the
+                      preview retimes as you scrub it — and it is the rate the
+                      manifest and every generated engine file carry, which is
+                      why it sits here rather than in a settings pane.
+                    */}
+                    <ScrubField
+                      className="h-[22px] w-24"
+                      label="Rate"
+                      unit="fps"
+                      value={Math.round(rowFps * 100) / 100}
+                      min={0.1}
+                      max={240}
+                      step={1}
+                      disabled={!activeRow}
+                      aria-label="Sequence frame rate"
+                      data-testid="sequence-fps-field"
+                      onValueChange={(next) => {
+                        if (!activeRow) return;
+                        updateFps(activeRow.uuid, next);
+                      }}
+                    />
+                    <span className="font-mono text-[10px] text-faint-foreground tabular-nums">
+                      {frameIntervalMs}ms/frame
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!activeRow || activeRow.images.length === 0}
+                      onClick={() => {
+                        if (!activeRow) return;
+                        reorderItems({
+                          items: activeRow.images.map((src, frameIndex) => ({
+                            src,
+                            id: frameIndex,
+                          })),
+                          onChange: (items) =>
+                            updateImagesRow(
+                              selectedRow,
+                              items.map((item) => item.src),
+                              activeRow.normalImages
+                                ? items.map(
+                                    (item) => activeRow.normalImages![item.id],
+                                  )
+                                : undefined,
+                            ),
+                          onRenderItem: (item) => (
+                            <img
+                              key={`${item.id}`}
+                              className="size-24 rounded-md object-contain"
+                              src={addDataToImageIfNeeded(item.src)}
+                              alt={`Frame ${item.id + 1}`}
+                            />
+                          ),
+                        });
+                      }}
+                      className="flex h-[22px] items-center gap-1.5 rounded-md border border-stroke px-2 text-[10px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground disabled:opacity-40"
+                    >
+                      <Pencil size={10} />
+                      Edit frame {currentFrameIndex + 1}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditing((value) => !value)}
+                      aria-pressed={editing}
+                      className={cn(
+                        "flex h-[22px] items-center gap-1.5 rounded-md border px-2 text-[10px] transition-colors",
+                        editing
+                          ? "border-brand-line bg-brand-soft text-foreground"
+                          : "border-stroke text-muted-foreground hover:bg-row-hover hover:text-foreground",
+                      )}
+                    >
+                      <Layers size={10} />
+                      Edit sequence
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
-        </CollapsibleContent>
-      </Collapsible>
-    </section>
+    </div>
   );
 }

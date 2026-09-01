@@ -22,7 +22,11 @@ describe("export validation", () => {
     });
 
     expect(result.blocking).toBe(false);
-    expect(result.messages[0].message).toContain("transparent placeholders");
+    // The headline states the problem; the consequence lives in `detail`, so
+    // a narrow surface can print the headline alone without losing meaning.
+    expect(result.messages[0].message).toContain("No frames have captured normals");
+    expect(result.messages[0].detail).toContain("transparent placeholders");
+    expect(result.messages[0].stage).toBe("capture");
   });
 
   it("warns when the format does not emit normal atlases", () => {

@@ -8,6 +8,7 @@ export interface Entity {
   name: string;
   createdAt: number;
   metadata: Record<string, unknown>;
+  visible?: boolean;
 }
 
 export interface Transform {
@@ -36,6 +37,7 @@ export type ModelLoadState = "idle" | "loading" | "loaded" | "error";
 export interface ModelComponent {
   source?: ModelSource;
   authoredModelId?: string;
+  autoFitOnLoad?: boolean;
   file?: File;
   // file info
   fileName: string;
@@ -57,12 +59,14 @@ interface CameraBase {
 
 export interface PerspectiveCameraComponent extends CameraBase {
   fov: number;
+  zoom?: number;
   near: number;
   far: number;
 }
 
 export interface OrthographicCameraComponent extends CameraBase {
   zoom: number;
+  fov?: number;
   near: number;
   far: number;
 }

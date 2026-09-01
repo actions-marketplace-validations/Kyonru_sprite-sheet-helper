@@ -66,6 +66,10 @@ sprite-sheet-helper character.glb --format godot --output ./assets/sprites
 | --target         | string | —           | Camera target as `x,y,z`                  |
 | --directionOverride | string | —       | Per-direction override, e.g. `N:phi=45,theta=0,distance=3,target=0,0.8,0` |
 | --normalMap      | string | false       | Capture and export a matching normal atlas |
+| --skipStepLabel  | string | —           | Skip one workflow row label; repeat for multiple labels |
+| --skipStepLabels | string | —           | Comma-separated workflow row labels to skip |
+| --forceAnimationsInPlace | string | false | Keep workflow animation playback at the same root location |
+| --captureNormalMaps | string | false   | Override normal-map capture during workflow runs |
 | --atlasLayout    | string | rows        | `rows` or deterministic `packed` layout   |
 | --atlasPadding   | number | 0           | Empty pixels around each frame slot       |
 | --atlasBleed     | number | 0           | Edge-pixel extrusion around each frame    |
@@ -140,6 +144,42 @@ sprite-sheet-helper character.glb \
 ```
 
 Multi-page generic output writes `spritesheet.png`, `spritesheet_2.png`, and matching `spritesheet_normal.png`, `spritesheet_normal_2.png` files when normal maps are enabled. The JSON includes `meta.pages` and `quad.page` for page-aware loading. Engine exporters block multi-page plans until their generated code supports multiple texture pages.
+
+## Auto-Fit Framing
+
+Manual framing is a guess. A camera distance tuned so `idle` fills the frame will clip `run` or `jump`, and a distance safe for every clip wastes most of the sprite. Auto-fit measures first, then captures.
+
+Before capturing, the run poses every animation across its clip, measures world-space bounds at each sample, projects them through every direction's camera, and solves **one** framing that holds the widest case inside a margin you declare. Every row then captures at that same distance and target, so one scale and one pivot cover the whole sheet.
+
+| Option        | Default  | Description                                                    |
+| ------------- | -------- | -------------------------------------------------------------- |
+| `--fit`       | `manual` | `auto` solves the framing; `manual` keeps the camera as given.  |
+| `--margin`    | `0`      | Guaranteed transparent border around the sprite.                |
+| `--marginUnit`| `px`     | `px` or `percent`, per side.                                    |
+| `--fitScope`  | `all`    | What shares a framing: `all`, `animation`, or `direction`.      |
+| `--fitSamples`| `12`     | Poses sampled per clip while measuring.                         |
+
+```bash
+sprite-sheet-helper character.glb --workflow platformer --fit auto --margin 6
+```
+
+The default stays `manual`, so existing projects and CI configs keep the framing they already produce.
+
+### What the scope changes
+
+- `all` — one framing for every animation and direction. The consistent choice: a character is the same size in every sprite on the sheet.
+- `animation` — one framing per clip. Each clip fills its frame, but a tall clip and a short clip end up at different scales. This is the drift auto-fit exists to remove; use it only when rows are consumed independently.
+- `direction` — one framing per direction, for presets where profiles differ a lot between angles.
+
+### Margins and effects
+
+The solve reserves whatever the sprite postprocess needs. An outline of 3px is measured and kept out of the margin, so the silhouette never runs into its own bleed.
+
+### Notes
+
+- An explicit `--target` is treated as a deliberate pivot and is never overridden; without one, the camera re-centres on the measured content.
+- `--forceAnimationsInPlace` is honoured while measuring. With root motion live, bounds sweep the whole travel path and the solve pulls back to cover it.
+- Warnings appear in the workflow panel when a clip cannot be measured or the solve does not settle.
 
 ## JSON Output And Dry Runs
 
@@ -253,7 +293,7 @@ The JSON `animations` array contains one entry per direction per clip:
 ```json
 {
   "animations": [
-    { "name": "idle_N", "fps": 10, "frames": 8, "frameWidth": 64, "frameHeight": 64, "quads": [...] },
+    { "name": "idle_N", "fps": 10, "frames": 8, "frameWidth": 64, "frameHeight": 64, "workflow": { "workflowId": "topdown-4dir", "workflowLabel": "Top Down 4-directional", "animationName": "idle", "directionLabel": "N" }, "quads": [...] },
     { "name": "idle_E", ... },
     { "name": "idle_S", ... },
     { "name": "idle_W", ... },
@@ -261,6 +301,19 @@ The JSON `animations` array contains one entry per direction per clip:
     { "name": "walk_E", ... },
     { "name": "walk_S", ... },
     { "name": "walk_W", ... }
+  ],
+  "directionalAnimations": [
+    {
+      "name": "idle",
+      "workflowId": "topdown-4dir",
+      "workflowLabel": "Top Down 4-directional",
+      "directions": [
+        { "label": "N", "animation": "idle_N" },
+        { "label": "E", "animation": "idle_E" },
+        { "label": "S", "animation": "idle_S" },
+        { "label": "W", "animation": "idle_W" }
+      ]
+    }
   ]
 }
 ```

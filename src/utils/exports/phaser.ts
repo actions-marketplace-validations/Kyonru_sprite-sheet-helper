@@ -2,8 +2,8 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
 
 export const createPhaserAtlasJSON = (
@@ -40,6 +40,7 @@ export const createPhaserAtlasJSON = (
 export const createPhaserTS = (
   json: SpritesheetJSON,
   imagePath = "spritesheet.png",
+  atlasPath = "spritesheet_atlas.json",
 ): string => {
   const key = imagePath.replace(/\.[^/.]+$/, "");
   const lines: string[] = [];
@@ -56,9 +57,7 @@ export const createPhaserTS = (
   lines.push(`const SHEET_KEY = "${key}";`);
   lines.push(``);
   lines.push(`export function preload(scene: Phaser.Scene): void {`);
-  lines.push(
-    `  scene.load.atlas(SHEET_KEY, "${imagePath}", "spritesheet_atlas.json");`,
-  );
+  lines.push(`  scene.load.atlas(SHEET_KEY, "${imagePath}", "${atlasPath}");`);
   lines.push(`}`);
   lines.push(``);
   lines.push(`export function createAnims(scene: Phaser.Scene): void {`);
@@ -87,12 +86,35 @@ export const createPhaserTS = (
   return lines.join("\n");
 };
 
-export const createPhaserExample = (json: SpritesheetJSON): string => {
-  const firstName = json.animations[0]?.name ?? "walk";
+/**
+ * A scene that loads every sheet and plays the first animation of the first.
+ *
+ * Each sheet is its own module with its own texture key, so a grouped export
+ * needs all of them preloaded before any of them can be drawn — the example
+ * shows that wiring rather than only the sheet it happens to play.
+ */
+export const createPhaserExample = (
+  sheets: { base: string; json: SpritesheetJSON }[],
+): string => {
+  const first = sheets[0];
+  const firstName = first?.json.animations[0]?.name ?? "walk";
+  const moduleName = (base: string) => `${base}_phaser`;
+  const alias = (base: string) =>
+    base
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((word, index) =>
+        index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1),
+      )
+      .join("");
+
   return [
     `import { Scene, GameObjects } from "phaser";`,
     ``,
-    `import { preload, createAnims } from "./spritesheet_phaser";`,
+    ...sheets.map(
+      (sheet) =>
+        `import * as ${alias(sheet.base)} from "./${moduleName(sheet.base)}";`,
+    ),
     ``,
     `export class Game extends Scene {`,
     `  private player!: GameObjects.Sprite;`,
@@ -102,12 +124,12 @@ export const createPhaserExample = (json: SpritesheetJSON): string => {
     ``,
     `  preload() {`,
     `    this.load.setPath("assets");`,
-    `    preload(this);`,
+    ...sheets.map((sheet) => `    ${alias(sheet.base)}.preload(this);`),
     `  }`,
     ``,
     `  create() {`,
-    `    createAnims(this);`,
-    `    this.player = this.add.sprite(160, 120, "spritesheet");`,
+    ...sheets.map((sheet) => `    ${alias(sheet.base)}.createAnims(this);`),
+    `    this.player = this.add.sprite(160, 120, "${first?.base ?? "spritesheet"}");`,
     `    this.player.play("${firstName}");`,
     `  }`,
     `}`,
@@ -118,27 +140,56 @@ export const phaserExporter: Exporter<"phaser"> = {
   id: "phaser",
   label: "PhaserJS",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
       exporterId: "phaser",
+      spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "PhaserJS");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "PhaserJS");
+    }
 
     return {
       filename: "phaser.zip",
       files: [
-        { name: "spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(normalBase64PNG),
+        ...sheets.flatMap((sheet) => {
+          const atlasPath = `${sheet.base}_atlas.json`;
+          return [
+            ...sheetImageFiles(sheet),
+            {
+              name: atlasPath,
+              content: createPhaserAtlasJSON(
+                sheet.assets.json,
+                sheet.imagePath,
+              ),
+            },
+            sheet.assets.manifestFile,
+            {
+              name: `${sheet.base}_phaser.ts`,
+              content: createPhaserTS(
+                sheet.assets.json,
+                sheet.imagePath,
+                atlasPath,
+              ),
+            },
+          ];
+        }),
         {
-          name: "spritesheet_atlas.json",
-          content: createPhaserAtlasJSON(json),
+          name: "example.ts",
+          content: createPhaserExample(
+            sheets.map((sheet) => ({
+              base: sheet.base,
+              json: sheet.assets.json,
+            })),
+          ),
         },
-        manifestFile,
-        { name: "spritesheet_phaser.ts", content: createPhaserTS(json) },
-        { name: "example.ts", content: createPhaserExample(json) },
       ],
     };
   },

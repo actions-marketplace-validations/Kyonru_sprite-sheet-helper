@@ -1,25 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Boxes,
   CheckCircle2,
-  Clock,
   Code2,
   Download,
   FileArchive,
-  FileJson,
   Film,
   Gamepad2,
-  Grid2X2,
-  ImageIcon,
   Layers,
-  ListChecks,
   Package,
   Play,
   Plus,
-  Settings2,
   SquareStack,
   Trash2Icon,
+  Crosshair,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -30,25 +24,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ScrubField } from "@/components/ui/scrub-field";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EventType, PubSub } from "@/lib/events";
+import { useEntitiesStore } from "@/store/next/entities";
 import { useImagesStore } from "@/store/next/images";
 import { useSettingsStore } from "@/store/next/settings";
 import type { ExportFormat, ExportRow } from "@/types/file";
 import { exporters } from "@/utils/exports";
-import { DEFAULT_ATLAS_OPTIONS, atlasPageFileName } from "@/utils/atlas";
+import {
+  DEFAULT_ATLAS_OPTIONS,
+  atlasPageFileName,
+  getAtlasPageCoverage,
+} from "@/utils/atlas";
+import { dedupeFileNames } from "@/utils/exports/helpers";
 import {
   getExportSummary,
   validateExportRequest,
+  type ExportStage,
   type ExportValidationMessage,
 } from "@/utils/export-validation";
 import {
@@ -56,7 +51,24 @@ import {
   loadExportHistory,
   type ExportHistoryEntry,
 } from "@/utils/export-history";
-import { SequencePreview } from "./export-workbench/sequence-preview";
+import { PanelEmpty } from "@/components/panels/panel-empty";
+import { PanelHeader } from "@/components/panels/panel-header";
+import {
+  Stage,
+  ValidationNote,
+  stageStateFor,
+} from "./export-workbench/pipeline";
+import { AtlasMap } from "./export-workbench/atlas-map";
+import { PackSettings } from "./export-workbench/pack-settings";
+import { SheetAssignments } from "./export-workbench/sheet-assignments";
+import { WritesTree } from "./export-workbench/writes-tree";
+import {
+  ControlGroup,
+  PanelSection,
+} from "./export-workbench/panel-section";
+import { SpritePostprocessWorkbench } from "./export-workbench/sprite-postprocess";
+import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
+import { useFitCamera } from "@/hooks/next/use-fit-camera";
 
 const FORMAT_NOTES: Partial<
   Record<ExportFormat, { category: string; note: string }>
@@ -111,6 +123,34 @@ const FORMAT_NOTES: Partial<
   },
 };
 
+/**
+ * Category order for the export dialog. Declared rather than derived: the
+ * generic atlas is what most people want, engine packages are the long tail.
+ */
+/**
+ * Below this share of the page in use, the atlas is mostly empty space.
+ *
+ * Above it the number is not actionable — the packer is already doing its job —
+ * so the readout stays quiet rather than reporting a figure nobody acts on.
+ */
+const WASTED_PAGE_COVERAGE = 0.2;
+
+/**
+ * Tallest the atlas miniature gets in the export dialog.
+ *
+ * Well above the rail's cap — the dialog is the surface with room to show the
+ * page properly — but still short enough that the file list below it stays on
+ * screen without scrolling.
+ */
+const PREFLIGHT_MAP_HEIGHT = 260;
+
+const FORMAT_CATEGORY_ORDER = [
+  "Generic atlas",
+  "Raw frames",
+  "Animation",
+  "Engine package",
+] as const;
+
 const FORMAT_ICONS: Record<ExportFormat, LucideIcon> = {
   spritesheet: SquareStack,
   zip: FileArchive,
@@ -134,7 +174,7 @@ type FormatLogo = {
 const FORMAT_LOGOS: Partial<Record<ExportFormat, FormatLogo>> = {
   phaser: { light: "/phaser.png" },
   bevy: { light: "/bevy.svg" },
-  godot: { light: "/godot.svg" },
+  godot: { light: "/godot.png" },
   unity: { light: "/unity.svg", dark: "/unity_dark.svg" },
   "love2d-lua": { light: "/love.svg" },
   "love2d-anim8": { light: "/love.svg" },
@@ -143,117 +183,17 @@ const FORMAT_LOGOS: Partial<Record<ExportFormat, FormatLogo>> = {
   raylib: { light: "/raylib.png" },
 };
 
+const FORMAT_GROUPS = FORMAT_CATEGORY_ORDER.map((category) => ({
+  category,
+  formats: Object.values(exporters).filter(
+    (exporter) => FORMAT_NOTES[exporter.id]?.category === category,
+  ),
+})).filter((group) => group.formats.length > 0);
+
 function getFormatLogo(format: ExportFormat, theme: "light" | "dark") {
   const logo = FORMAT_LOGOS[format];
   if (!logo) return undefined;
   return theme === "dark" && logo.dark ? logo.dark : logo.light;
-}
-
-function Stat({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: string | number;
-  icon: LucideIcon;
-}) {
-  return (
-    <div className="rounded-md border px-3 py-2">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon size={13} />
-        {label}
-      </div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  icon: Icon,
-  logo,
-}: {
-  label: string;
-  value: string | number;
-  icon?: LucideIcon;
-  logo?: string;
-}) {
-  return (
-    <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
-      <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-        {logo ? (
-          <img
-            src={logo}
-            alt=""
-            aria-hidden="true"
-            className="size-3.5 shrink-0 object-contain"
-            draggable={false}
-          />
-        ) : (
-          Icon && <Icon size={12} className="shrink-0" />
-        )}
-        {label}
-      </div>
-      <div className="mt-0.5 truncate text-sm font-semibold tabular-nums">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function SectionShell({
-  title,
-  description,
-  icon: Icon,
-  action,
-  children,
-}: {
-  title: string;
-  description?: string;
-  icon?: LucideIcon;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-md border bg-background">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b px-3 py-2.5">
-        <div className="flex min-w-0 items-start gap-2">
-          {Icon && (
-            <span className="mt-0.5 rounded-md border bg-muted/30 p-1">
-              <Icon size={14} />
-            </span>
-          )}
-          <div className="min-w-0">
-            <h3 className="text-sm font-medium">{title}</h3>
-            {description && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {description}
-              </p>
-            )}
-          </div>
-        </div>
-        {action}
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
-}
-
-function OutputFileIcon({ file }: { file: string }) {
-  const Icon = file.endsWith(".json")
-    ? FileJson
-    : file.endsWith(".gif")
-      ? Film
-      : file.endsWith(".png") || file.includes("*.png")
-        ? ImageIcon
-        : /\.(ts|rs|lua|gd|py|h|c|cs)$/.test(file) ||
-            file.endsWith(".toml.snippet")
-          ? Code2
-          : FileArchive;
-
-  return <Icon size={13} className="shrink-0" />;
 }
 
 function FormatMark({
@@ -270,17 +210,22 @@ function FormatMark({
   const logo = getFormatLogo(format, theme);
   const Icon = FORMAT_ICONS[format];
 
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-md border",
-        compact ? "size-6" : "size-8",
-        selected
-          ? "border-primary/30 bg-primary/15"
-          : "bg-muted/30 text-muted-foreground",
-      )}
-    >
-      {logo ? (
+  /*
+    Two substrates on purpose. Our own icons are ours to theme, so they sit on
+    the surface tile and take the accent when selected. A third-party logo is
+    not ours to recolour — several ship with black fills that disappear on a
+    dark ground, and only Unity has a dark variant — so every brand mark gets a
+    light chip, which is the background it was drawn for.
+  */
+  if (logo) {
+    return (
+      <span
+        className={cn(
+          "inline-grid shrink-0 place-items-center rounded-md border bg-[#e9eaec]",
+          compact ? "size-6" : "size-8",
+          selected ? "border-brand-line" : "border-stroke-strong",
+        )}
+      >
         <img
           src={logo}
           alt=""
@@ -288,9 +233,21 @@ function FormatMark({
           className={cn("object-contain", compact ? "size-4" : "size-5")}
           draggable={false}
         />
-      ) : (
-        <Icon size={compact ? 14 : 16} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-grid shrink-0 place-items-center rounded-md border",
+        compact ? "size-6" : "size-8",
+        selected
+          ? "border-brand-line bg-brand-soft text-brand"
+          : "border-stroke bg-surface-high text-faint-foreground",
       )}
+    >
+      <Icon size={compact ? 14 : 16} />
     </span>
   );
 }
@@ -332,30 +289,87 @@ function ValidationMessages({
 function NumberField({
   label,
   value,
+  unit,
   min = 0,
+  max,
   step = 1,
   inputTestId,
   onChange,
 }: {
   label: string;
   value: number;
+  /** Rendered inside the field, so the label stays a name and not a spec. */
+  unit?: string;
   min?: number;
+  max?: number;
   step?: number;
   inputTestId?: string;
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="grid gap-1 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <Input
-        type="number"
-        data-testid={inputTestId}
-        min={min}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </label>
+    <ScrubField
+      label={label}
+      value={value}
+      unit={unit}
+      min={min}
+      max={max}
+      step={step}
+      onValueChange={onChange}
+      data-testid={inputTestId}
+    />
+  );
+}
+
+function StatusPill({
+  blocking,
+  warnings,
+  className,
+}: {
+  blocking: boolean;
+  warnings: number;
+  className?: string;
+}) {
+  const tone = blocking
+    ? "border-destructive/30 bg-destructive/10 text-destructive"
+    : warnings > 0
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
+  const label = blocking
+    ? "Needs fixes"
+    : warnings > 0
+      ? `${warnings} warning${warnings === 1 ? "" : "s"}`
+      : "Ready";
+
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+        tone,
+        className,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function EmptyCapture({ isRecording }: { isRecording: boolean }) {
+  return (
+    <PanelEmpty
+      icon={Film}
+      title="No frames captured"
+      description="Pose the scene, then record a sequence to build an atlas."
+      boxed
+    >
+      <Button
+        size="sm"
+        disabled={isRecording}
+        onClick={() => PubSub.emit(EventType.START_ASSETS_CREATION)}
+      >
+        <Play size={13} />
+        Record sequence
+      </Button>
+    </PanelEmpty>
   );
 }
 
@@ -489,6 +503,8 @@ export function ExportWorkbench() {
   const exportWidth = useSettingsStore((state) => state.exportWidth);
   const exportHeight = useSettingsStore((state) => state.exportHeight);
   const setExportWidth = useSettingsStore((state) => state.setExportWidth);
+  const fitMargin = useSettingsStore((state) => state.fitMargin);
+  const setFitMargin = useSettingsStore((state) => state.setFitMargin);
   const setExportHeight = useSettingsStore((state) => state.setExportHeight);
   const exportNormalMap = useSettingsStore((state) => state.exportNormalMap);
   const setExportNormalMap = useSettingsStore(
@@ -497,13 +513,33 @@ export function ExportWorkbench() {
   const atlasLayout = useSettingsStore((state) => state.atlasLayout);
   const atlasPadding = useSettingsStore((state) => state.atlasPadding);
   const atlasBleed = useSettingsStore((state) => state.atlasBleed);
+  const atlasSpriteMargin = useSettingsStore(
+    (state) => state.atlasSpriteMargin,
+  );
   const atlasScale = useSettingsStore((state) => state.atlasScale);
   const maxAtlasSize = useSettingsStore((state) => state.maxAtlasSize);
   const allowMultiPage = useSettingsStore((state) => state.allowMultiPage);
   const setAtlasOptions = useSettingsStore((state) => state.setAtlasOptions);
 
+  const { fitCameraToAnimation } = useFitCamera();
+  const postprocessEnabled = useSpritePostprocessStore((state) => state.enabled);
+  const postprocessEffectCount = useSpritePostprocessStore(
+    (state) => state.effects.filter((effect) => effect.enabled).length,
+  );
+  const postprocessHint = postprocessEnabled
+    ? `${postprocessEffectCount} on`
+    : "off";
+
+  const entityCount = useEntitiesStore(
+    (state) => Object.keys(state.entities).length,
+  );
+
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
   const [preflightOpen, setPreflightOpen] = useState(false);
+  /** Which sheet the dialog's map and readout are showing. */
+  const [selectedSheet, setSelectedSheet] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [history, setHistory] = useState<ExportHistoryEntry[]>(() =>
     loadExportHistory(),
   );
@@ -513,6 +549,7 @@ export function ExportWorkbench() {
       layout: atlasLayout,
       padding: atlasPadding,
       extrude: atlasBleed,
+      spriteMargin: atlasSpriteMargin,
       scale: atlasScale,
       maxAtlasSize,
       allowMultiPage,
@@ -520,6 +557,7 @@ export function ExportWorkbench() {
     [
       allowMultiPage,
       atlasBleed,
+      atlasSpriteMargin,
       atlasLayout,
       atlasPadding,
       atlasScale,
@@ -540,19 +578,67 @@ export function ExportWorkbench() {
     () => getExportSummary(rows, atlasOptions),
     [atlasOptions, rows],
   );
+
+  const sheets = validation.sheets;
+  // A sheet can vanish under the selection: reassign the last sequence out of
+  // one and it stops existing, which must not leave the map pointed at nothing.
+  const activeSheet = sheets[Math.min(selectedSheet, sheets.length - 1)] ?? null;
+
+  /**
+   * The width the miniature will actually occupy, so the readout beside it can
+   * be laid out against a real number instead of a column that only the map
+   * knows how to size. The map caps its height and derives its width from the
+   * page's aspect ratio; this is that same derivation, and it falls back to the
+   * map's own 2:1 placeholder when there is no page yet.
+   */
+  const mapWidth = useMemo(() => {
+    const width = activeSheet?.imageWidth ?? 0;
+    const height = activeSheet?.imageHeight ?? 0;
+    const ratio = width > 0 && height > 0 ? width / height : 2;
+    return Math.round(PREFLIGHT_MAP_HEIGHT * ratio);
+  }, [activeSheet?.imageHeight, activeSheet?.imageWidth]);
+
+  const pageCoverage = useMemo(
+    () => getAtlasPageCoverage(activeSheet?.plan ?? null),
+    [activeSheet?.plan],
+  );
+
+  /**
+   * Messages routed to the stage that owns them, so a problem is reported where
+   * it can be fixed rather than in one undifferentiated list at the bottom.
+   * Anything unstaged falls through to the footer.
+   */
+  const stageMessages = useMemo(() => {
+    const byStage: Record<ExportStage, ExportValidationMessage[]> = {
+      scene: [],
+      capture: [],
+      effects: [],
+      pack: [],
+      export: [],
+    };
+    for (const message of validation.messages) {
+      if (message.stage) byStage[message.stage].push(message);
+    }
+    return byStage;
+  }, [validation.messages]);
+
+  /** The furthest stage with nothing blocking it — what the action tile reports. */
+  const reachedStage = useMemo(() => {
+    if (entityCount === 0) return 1;
+    if (rows.length === 0) return 2;
+    if (validation.blocking) return 4;
+    return 5;
+  }, [entityCount, rows.length, validation.blocking]);
+
+  const unstagedMessages = useMemo(
+    () => validation.messages.filter((message) => !message.stage),
+    [validation.messages],
+  );
+
   const selectedExporter = exporters[mode];
-  const selectedNote = FORMAT_NOTES[mode];
-  const blockingCount = validation.messages.filter(
-    (message) => message.severity === "error",
-  ).length;
   const warningCount = validation.messages.filter(
     (message) => message.severity === "warning",
   ).length;
-  const preflightStatus = validation.blocking
-    ? "Needs fixes"
-    : warningCount > 0
-      ? "Warnings"
-      : "Ready";
 
   useEffect(() => {
     const onStopExport = () => {
@@ -565,11 +651,29 @@ export function ExportWorkbench() {
     };
   }, []);
 
+  useEffect(() => {
+    const onStartAssetsCreation = () => {
+      setIsRecording(true);
+    };
+
+    const onStopAssetsCreation = () => {
+      setIsRecording(false);
+    };
+
+    PubSub.on(EventType.START_ASSETS_CREATION, onStartAssetsCreation);
+    PubSub.on(EventType.STOP_ASSETS_CREATION, onStopAssetsCreation);
+    return () => {
+      PubSub.off(EventType.START_ASSETS_CREATION, onStartAssetsCreation);
+      PubSub.off(EventType.STOP_ASSETS_CREATION, onStopAssetsCreation);
+    };
+  }, []);
+
   const startExport = () => {
     setExporting(true);
     PubSub.emit(EventType.START_EXPORT, {
       format: mode,
       atlasOptions,
+      spritePostprocess: useSpritePostprocessStore.getState().getSnapshot(),
     });
     setPreflightOpen(false);
   };
@@ -584,78 +688,147 @@ export function ExportWorkbench() {
           atlasPageFileName("spritesheet_normal.png", page.index),
         )
       : [];
-  const outputFiles = getPreflightOutputFiles({
-    format: mode,
-    rows,
-    atlasFiles,
-    normalFiles,
-  });
+  const outputFiles = dedupeFileNames(
+    getPreflightOutputFiles({
+      format: mode,
+      rows,
+      atlasFiles,
+      normalFiles,
+    }),
+  );
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <header className="shrink-0 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <FileArchive size={17} />
-          <h2 className="text-sm font-semibold">Export Workbench</h2>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Review captures, prepare atlas output, and package engine files.
-        </p>
-      </header>
+    /*
+      Two tiles: the pipeline, and the one action. Matching the other columns —
+      each concern gets its own surface and the gutter between them carries the
+      separation, rather than a shared border inside one big pane.
+    */
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-stroke bg-card">
+      <PanelHeader icon={FileArchive} title="Export">
+        <StatusPill blocking={validation.blocking} warnings={warningCount} />
+      </PanelHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
-        <section className="grid grid-cols-2 gap-2">
-          <Stat label="Sequences" value={summary.animationCount} icon={Film} />
-          <Stat label="Frames" value={summary.frameCount} icon={ImageIcon} />
-          <Stat
-            label="Pages"
-            value={summary.pageCount || "-"}
-            icon={SquareStack}
-          />
-          <Stat
-            label="Frame"
-            value={`${exportWidth}x${exportHeight}`}
-            icon={Boxes}
-          />
-        </section>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-3 pt-1">
+        {/*
+          The rail is a pipeline: scene → capture → effects → pack → export.
+          Each stage depends only on the ones above it, and reports its own
+          state, so "what is blocking me" is answerable without opening
+          anything. It is a status map rather than a wizard — every stage stays
+          reachable, because people re-record after seeing the atlas.
+        */}
+        <Stage
+          index={1}
+          title="Scene"
+          hint={`${entityCount} object${entityCount === 1 ? "" : "s"}`}
+          state={entityCount > 0 ? "done" : "todo"}
+        />
 
-        <section className="mt-3 rounded-md border">
-          <div className="border-b px-3 py-2 text-sm font-medium">Capture</div>
-          <div className="grid gap-2 p-3">
-            <div className="grid grid-cols-2 gap-2">
+        <Stage
+          index={2}
+          title="Capture"
+          hint={
+            rows.length > 0
+              ? `${summary.animationCount} seq · ${summary.frameCount}f`
+              : `${exportWidth}×${exportHeight}`
+          }
+          state={stageStateFor(
+            "capture",
+            validation.messages,
+            rows.length > 0 ? "done" : "active",
+          )}
+        >
+          <div className="grid gap-3">
+            {stageMessages.capture.map((message, index) => (
+              <ValidationNote key={index} message={message} showDetail />
+            ))}
+
+            <ControlGroup label="Timing">
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="Interval"
+                  unit="ms"
+                  value={intervals}
+                  min={1}
+                  onChange={setIntervals}
+                />
+                <NumberField
+                  label="Frames"
+                  value={iterations}
+                  min={1}
+                  onChange={setIterations}
+                />
+              </div>
+              {/*
+                Named `fps` in the store, but it reaches gif.js as `delay`, and
+                only for rows that carry no rate of their own — a sequence's own
+                rate, set beside its preview, is what the GIF and every manifest
+                are written with.
+              */}
               <NumberField
-                label="Frame interval ms"
-                value={intervals}
-                min={1}
-                onChange={setIntervals}
-              />
-              <NumberField
-                label="Frames"
-                value={iterations}
-                min={1}
-                onChange={setIterations}
-              />
-              <NumberField
-                label="Frame duration"
+                label="GIF delay fallback"
+                unit="ms"
                 value={fps}
                 min={1}
                 onChange={setFPS}
               />
-              <NumberField
-                label="Width"
-                value={exportWidth}
-                min={1}
-                onChange={setExportWidth}
-              />
-              <NumberField
-                label="Height"
-                value={exportHeight}
-                min={1}
-                onChange={setExportHeight}
-              />
-            </div>
-            <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              Capture normal maps
+            </ControlGroup>
+
+            <ControlGroup label="Frame size">
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="Width"
+                  unit="px"
+                  value={exportWidth}
+                  min={1}
+                  onChange={setExportWidth}
+                />
+                <NumberField
+                  label="Height"
+                  unit="px"
+                  value={exportHeight}
+                  min={1}
+                  onChange={setExportHeight}
+                />
+              </div>
+            </ControlGroup>
+
+            <ControlGroup label="Framing">
+              <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                <NumberField
+                  label="Margin"
+                  unit="px"
+                  value={fitMargin}
+                  min={0}
+                  onChange={setFitMargin}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 gap-1.5 px-2 text-[11px]"
+                  title="Solve a camera distance that fits every animation inside this margin"
+                  onClick={() => {
+                    const result = fitCameraToAnimation({
+                      margin: fitMargin,
+                      marginUnit: "px",
+                    });
+                    if (result.fitted) {
+                      toast.success(
+                        `Fitted at distance ${result.distance?.toFixed(2)}`,
+                      );
+                    } else {
+                      toast.error(result.warnings[0] ?? "Nothing to fit.");
+                    }
+                  }}
+                >
+                  <Crosshair size={12} />
+                  Fit
+                </Button>
+              </div>
+            </ControlGroup>
+
+            <label className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-muted-foreground">Capture normal maps</span>
               <Switch
                 checked={exportNormalMap}
                 onCheckedChange={(checked) =>
@@ -663,473 +836,488 @@ export function ExportWorkbench() {
                 }
               />
             </label>
-            <div className="grid grid-cols-3 gap-2">
+
+            <div className="grid grid-cols-3 gap-1.5">
               <Button
                 size="sm"
                 variant="outline"
+                className="h-6 gap-1 px-2 text-[11px]"
                 onClick={() => PubSub.emit(EventType.START_ASSETS_CREATION)}
+                disabled={isRecording}
               >
-                <Play size={14} />
+                <Play size={12} />
                 Record
               </Button>
               <Button
                 size="sm"
                 variant="outline"
+                className="h-6 gap-1 px-2 text-[11px]"
                 onClick={() => PubSub.emit(EventType.TAKE_SINGLE_SCREENSHOT)}
               >
-                <Plus size={14} />
+                <Plus size={12} />
                 Frame
               </Button>
               <Button
                 size="sm"
                 variant="outline"
+                className="h-6 gap-1 px-2 text-[11px]"
                 onClick={() => PubSub.emit(EventType.NEW_SEQUENCE)}
               >
-                <Layers size={14} />
+                <Layers size={12} />
                 Row
               </Button>
             </div>
           </div>
-        </section>
+        </Stage>
 
-        <SequencePreview />
-
-        <section className="mt-3 rounded-md border">
-          <div className="border-b px-3 py-2 text-sm font-medium">Output</div>
-          <div className="grid gap-2 p-3 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Format</span>
-              <span className="font-medium">{selectedExporter.label}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Layout</span>
-              <span className="capitalize">{atlasLayout}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Normal maps</span>
-              <span className="capitalize">{summary.normalStatus}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Atlas</span>
-              <span>
-                {summary.imageWidth}x{summary.imageHeight}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-3">
-          <ValidationMessages messages={validation.messages.slice(0, 3)} />
-        </section>
-
-        <section className="mt-3 rounded-md border">
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="text-sm font-medium">Recent Exports</span>
-            <Button
-              size="icon"
-              variant="ghost"
-              title="Clear export history"
-              onClick={() => setHistory(clearExportHistory())}
-              disabled={history.length === 0}
-            >
-              <Trash2Icon size={14} />
-            </Button>
-          </div>
-          <div className="grid gap-2 p-3">
-            {history.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Successful exports will appear here.
-              </p>
-            ) : (
-              history.slice(0, 5).map((entry) => (
-                <div key={entry.id} className="rounded-md border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="truncate font-medium">
-                      {entry.filename}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {formatTimestamp(entry.timestamp)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[11px] text-muted-foreground">
-                    {entry.format} · {entry.frameCount} frames ·{" "}
-                    {entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
-
-      <footer className="shrink-0 border-t p-3">
-        <Button
-          className="w-full gap-2"
-          data-testid="prepare-export-button"
-          onClick={() => setPreflightOpen(true)}
-          disabled={exporting}
+        <Stage
+          index={3}
+          title="Effects"
+          hint={postprocessHint}
+          state={stageStateFor(
+            "effects",
+            validation.messages,
+            postprocessEnabled ? "done" : "todo",
+          )}
         >
-          <Download size={15} />
-          {exporting ? "Exporting" : "Prepare Export"}
-        </Button>
-      </footer>
+          <SpritePostprocessWorkbench rows={rows} atlasOptions={atlasOptions} />
+        </Stage>
 
-      <Dialog open={preflightOpen} onOpenChange={setPreflightOpen}>
-        <DialogContent className="flex h-[min(92vh,900px)] w-[calc(100vw-1rem)] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[calc(100vw-1rem)] 2xl:max-w-[1600px] z-999">
-          <DialogHeader className="border-b px-5 py-4 pe-12">
-            <div className="flex flex-wrap items-center gap-2">
-              <DialogTitle className="flex items-center gap-2">
-                <FileArchive size={18} />
-                Export Preflight
-              </DialogTitle>
-              <span
-                className={cn(
-                  "rounded-full border px-2 py-0.5 text-xs font-medium",
-                  validation.blocking
-                    ? "border-destructive/30 bg-destructive/10 text-destructive"
-                    : warningCount > 0
-                      ? "border-amber-500/30 bg-amber-500/10 text-amber-700"
-                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
-                )}
-              >
-                {preflightStatus}
-              </span>
-            </div>
-            <DialogDescription>
-              Choose the exporter, check atlas settings, then confirm the files
-              that will be created.
-            </DialogDescription>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              <MiniStat
-                label="Format"
-                value={selectedExporter.label}
-                icon={FORMAT_ICONS[mode]}
-                logo={getFormatLogo(mode, theme)}
-              />
-              <MiniStat
-                label="Frames"
-                value={summary.frameCount}
-                icon={ImageIcon}
-              />
-              <MiniStat
-                label="Sequences"
-                value={summary.animationCount}
-                icon={Film}
-              />
-              <MiniStat
-                label="Atlas"
-                value={
-                  summary.imageWidth > 0
-                    ? `${summary.imageWidth}x${summary.imageHeight}`
-                    : "-"
-                }
-                icon={SquareStack}
-              />
-              <MiniStat
-                label="Checks"
-                value={
-                  blockingCount > 0
-                    ? `${blockingCount} blocking`
-                    : warningCount > 0
-                      ? `${warningCount} warning${warningCount === 1 ? "" : "s"}`
-                      : "Clear"
-                }
-                icon={validation.blocking ? AlertTriangle : CheckCircle2}
-              />
-            </div>
-          </DialogHeader>
-          <main className="min-h-0 flex-1 overflow-auto bg-muted/20 p-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-              <div className="grid min-w-0 gap-4">
-                <SectionShell
-                  title="Format"
-                  description="Pick the package shape for this export."
-                  icon={Package}
-                  action={
-                    <Select
-                      value={mode}
-                      onValueChange={(value) => setMode(value as ExportFormat)}
-                    >
-                      <SelectTrigger size="sm" className="w-[190px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(exporters).map((exporter) => (
-                          <SelectItem key={exporter.id} value={exporter.id}>
-                            <span className="flex items-center gap-2">
-                              <FormatMark
-                                format={exporter.id}
-                                selected={mode === exporter.id}
-                                theme={theme}
-                                compact
-                              />
-                              {exporter.label}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  }
-                >
-                  <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
-                    {Object.values(exporters).map((exporter) => {
-                      const note = FORMAT_NOTES[exporter.id];
-                      const selected = mode === exporter.id;
+        <Stage
+          index={4}
+          title="Pack"
+          hint={
+            activeSheet?.plan
+              ? `${sheets.length > 1 ? `${sheets.length} sheets · ` : ""}${activeSheet.imageWidth}×${activeSheet.imageHeight}`
+              : undefined
+          }
+          state={stageStateFor(
+            "pack",
+            validation.messages,
+            rows.length > 0 ? "active" : "todo",
+          )}
+        >
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <EmptyCapture isRecording={isRecording} />
+            ) : (
+              <>
+                {/* One map per rail, so it shows one sheet: the chips say
+                    which, and say plainly that there is more than one atlas
+                    coming out — the map alone would read as the whole export. */}
+                {sheets.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {sheets.map((sheet, index) => {
+                      const active =
+                        index === Math.min(selectedSheet, sheets.length - 1);
                       return (
                         <button
-                          key={exporter.id}
+                          key={sheet.name}
                           type="button"
-                          data-testid={`export-format-${exporter.id}`}
-                          onClick={() => setMode(exporter.id)}
+                          onClick={() => setSelectedSheet(index)}
+                          aria-pressed={active}
                           className={cn(
-                            "min-h-20 rounded-md border px-3 py-2.5 text-left transition-colors",
-                            selected
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "bg-background hover:bg-muted",
+                            "flex h-[19px] items-center gap-1.5 rounded-md border px-2 text-[10px] transition-colors",
+                            active
+                              ? "border-transparent bg-brand-soft font-semibold text-foreground"
+                              : "border-stroke text-muted-foreground hover:bg-row-hover hover:text-foreground",
                           )}
                         >
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="flex min-w-0 items-center gap-2">
-                              <FormatMark
-                                format={exporter.id}
-                                selected={selected}
-                                theme={theme}
-                              />
-                              <span className="truncate text-sm font-medium">
-                                {exporter.label}
-                              </span>
-                            </span>
-                            {selected && (
-                              <CheckCircle2 size={14} className="shrink-0" />
-                            )}
-                          </span>
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            {note?.category ?? "Exporter"}
-                          </span>
-                          <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">
-                            {note?.note ?? "Packages captured frames."}
+                          <span className="max-w-28 truncate">{sheet.name}</span>
+                          <span className="font-mono text-[9px] text-faint-foreground tabular-nums">
+                            {sheet.frameCount}
                           </span>
                         </button>
                       );
                     })}
                   </div>
-                </SectionShell>
+                )}
+                <AtlasMap
+                  plan={activeSheet?.plan ?? null}
+                  rows={activeSheet?.rows}
+                  frameCount={activeSheet?.frameCount ?? 0}
+                  sequenceCount={activeSheet?.animationCount ?? 0}
+                />
+              </>
+            )}
+            {stageMessages.pack.map((message, index) => (
+              <ValidationNote key={index} message={message} showDetail />
+            ))}
+            {rows.length > 0 && <PackSettings />}
+          </div>
+        </Stage>
 
-                <SectionShell
-                  title="Atlas Settings"
-                  description="Rows keeps legacy layout; packed reduces empty space."
-                  icon={Settings2}
-                >
-                  <div className="grid gap-3">
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <Button
-                        type="button"
-                        data-testid="atlas-layout-rows-button"
-                        variant={
-                          atlasLayout === "rows" ? "secondary" : "outline"
-                        }
-                        className="h-auto justify-start px-3 py-2 text-left"
-                        onClick={() => setAtlasOptions({ layout: "rows" })}
-                      >
-                        <Layers size={16} className="shrink-0" />
-                        <span>
-                          <span className="block text-sm">
-                            Rows / compatible
-                          </span>
-                          <span className="block text-xs font-normal text-muted-foreground">
-                            Preserves sequence rows and frame order.
-                          </span>
-                        </span>
-                      </Button>
-                      <Button
-                        type="button"
-                        data-testid="atlas-layout-packed-button"
-                        variant={
-                          atlasLayout === "packed" ? "secondary" : "outline"
-                        }
-                        className="h-auto justify-start px-3 py-2 text-left"
-                        onClick={() => setAtlasOptions({ layout: "packed" })}
-                      >
-                        <Grid2X2 size={16} className="shrink-0" />
-                        <span>
-                          <span className="block text-sm">
-                            Packed / production
-                          </span>
-                          <span className="block text-xs font-normal text-muted-foreground">
-                            Deterministic packing without frame rotation.
-                          </span>
-                        </span>
-                      </Button>
+        <Stage
+          index={5}
+          title="Export"
+          hint={
+            rows.length === 0
+              ? undefined
+              : `${outputFiles.length} file${outputFiles.length === 1 ? "" : "s"}`
+          }
+          state={stageStateFor("export", validation.messages, "todo")}
+          last
+        >
+          {stageMessages.export.length > 0 ? (
+            <div className="grid gap-2">
+              {stageMessages.export.map((message, index) => (
+                <ValidationNote key={index} message={message} showDetail />
+              ))}
+            </div>
+          ) : null}
+        </Stage>
+
+        <div className="mt-1 border-t border-stroke pt-1">
+          <PanelSection
+            title="Recent exports"
+            hint={history.length > 0 ? `${history.length}` : undefined}
+          >
+            {history.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Successful exports will appear here.
+              </p>
+            ) : (
+              <div className="grid gap-1.5">
+                {history.slice(0, 5).map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-sm bg-row-hover px-2.5 py-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="truncate font-medium">
+                        {entry.filename}
+                      </span>
+                      <span className="shrink-0 text-faint-foreground tabular-nums">
+                        {formatTimestamp(entry.timestamp)}
+                      </span>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <NumberField
-                        label="Padding"
-                        value={atlasPadding}
-                        inputTestId="atlas-padding-input"
-                        onChange={(value) =>
-                          setAtlasOptions({ padding: value })
-                        }
-                      />
-                      <NumberField
-                        label="Extrude"
-                        value={atlasBleed}
-                        inputTestId="atlas-extrude-input"
-                        onChange={(value) =>
-                          setAtlasOptions({ extrude: value })
-                        }
-                      />
-                      <NumberField
-                        label="Max atlas"
-                        value={maxAtlasSize}
-                        min={1}
-                        inputTestId="atlas-max-size-input"
-                        onChange={(value) =>
-                          setAtlasOptions({ maxAtlasSize: value })
-                        }
-                      />
-                    </div>
-                    <div className="rounded-md border bg-muted/20 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium">
-                            Atlas scale
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Export at common pixel scales or enter a custom
-                            multiplier.
-                          </p>
-                        </div>
-                        <span className="rounded-full border bg-background px-2 py-0.5 text-xs font-medium">
-                          {atlasScale}x
-                        </span>
-                      </div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-[repeat(3,minmax(0,1fr))_110px]">
-                        {[1, 2, 4].map((scale) => (
-                          <Button
-                            key={scale}
-                            type="button"
-                            data-testid={`atlas-scale-${scale}x-button`}
-                            variant={
-                              atlasScale === scale ? "secondary" : "outline"
-                            }
-                            size="sm"
-                            onClick={() => setAtlasOptions({ scale })}
-                          >
-                            {scale}x
-                          </Button>
-                        ))}
-                        <Input
-                          type="number"
-                          min={0.1}
-                          step={0.1}
-                          value={atlasScale}
-                          aria-label="Custom atlas scale"
-                          onChange={(event) =>
-                            setAtlasOptions({
-                              scale: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2">
-                      <div className="flex min-w-0 items-start gap-2">
-                        <SquareStack
-                          size={15}
-                          className="mt-0.5 shrink-0 text-muted-foreground"
-                        />
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">
-                            Allow multi-page atlas
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Generic spritesheet supports pages now; engine
-                            exporters block unsafe multi-page output.
-                          </div>
-                        </div>
-                      </div>
-                      <Switch
-                        checked={allowMultiPage}
-                        onCheckedChange={(checked) =>
-                          setAtlasOptions({ allowMultiPage: Boolean(checked) })
-                        }
-                      />
+                    <div className="mt-0.5 text-[11px] text-faint-foreground tabular-nums">
+                      {entry.format} · {entry.frameCount} frames ·{" "}
+                      {entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}
                     </div>
                   </div>
-                </SectionShell>
+                ))}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="justify-start text-muted-foreground"
+                  onClick={() => setHistory(clearExportHistory())}
+                >
+                  <Trash2Icon size={13} />
+                  Clear history
+                </Button>
               </div>
+            )}
+          </PanelSection>
+        </div>
+      </div>
 
-              <aside className="grid min-w-0 gap-4 xl:sticky xl:top-0 xl:self-start">
-                <SectionShell title="Output Preview" icon={FileArchive}>
-                  <div className="grid gap-3 text-sm">
-                    <div className="flex items-start gap-2">
-                      <FormatMark format={mode} selected={true} theme={theme} />
-                      <div className="min-w-0">
-                        <div className="font-medium">
-                          {selectedExporter.label}
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {selectedNote?.note ?? "Packages captured frames."}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
-                      <div className="flex items-center gap-2 font-medium">
-                        <Clock size={13} />
-                        Files ({outputFiles.length})
-                      </div>
-                      <div className="mt-2 grid max-h-44 gap-1 overflow-auto text-muted-foreground">
-                        {outputFiles.map((file) => (
-                          <span
-                            key={file}
-                            className="flex items-center gap-2 truncate"
-                          >
-                            <OutputFileIcon file={file} />
-                            <span className="truncate">{file}</span>
+      </div>
+
+      {/*
+        The one action, on its own tile. It reports which stage the pipeline has
+        reached, so the button is never the only thing telling you whether the
+        export is ready.
+      */}
+      <footer className="shrink-0 rounded-lg border border-stroke bg-surface-high p-2">
+        {/*
+          Only messages with no stage of their own land here. Anything the
+          pipeline already reports is reported once, beside the control that
+          fixes it — printing it again above the button would make the reader
+          check whether it is a second, different problem.
+        */}
+        {unstagedMessages.length > 0 && (
+          <div className="mb-2.5">
+            <ValidationMessages messages={unstagedMessages.slice(0, 2)} />
+            {unstagedMessages.length > 2 && (
+              <button
+                type="button"
+                onClick={() => setPreflightOpen(true)}
+                className="mt-1 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+              >
+                +{unstagedMessages.length - 2} more in preflight
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="truncate text-[11px] font-semibold">
+            {selectedExporter.label}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-faint-foreground tabular-nums">
+            {rows.length === 0
+              ? "stage 2 of 5"
+              : validation.blocking
+                ? "blocked"
+                : `stage ${reachedStage} of 5 · ${outputFiles.length} file${outputFiles.length === 1 ? "" : "s"}`}
+          </span>
+        </div>
+
+        <Button
+          className="w-full gap-2"
+          data-testid="prepare-export-button"
+          onClick={() => setPreflightOpen(true)}
+          disabled={exporting || rows.length === 0}
+        >
+          <Download size={15} />
+          {exporting ? "Exporting…" : "Prepare Export"}
+        </Button>
+      </footer>
+
+      {/*
+        The export dialog is not a second settings screen. By the time it opens,
+        the rail has already reported the atlas state and the pack options live
+        in the Pack stage, next to the map they change. So this answers one
+        question: what exactly is about to be written, and where.
+
+        Format on the left, because it is the only real choice left to make;
+        the consequences of that choice on the right, updating as you pick.
+      */}
+      <Dialog open={preflightOpen} onOpenChange={setPreflightOpen}>
+        <DialogContent
+          className="z-999 flex max-h-[min(88vh,720px)] w-[calc(100vw-2rem)] max-w-[980px] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[980px]"
+          onOpenAutoFocus={(event) => {
+            // Otherwise focus lands on whichever format is first in the DOM,
+            // which reads as if that format were selected.
+            event.preventDefault();
+            exportButtonRef.current?.focus();
+          }}
+        >
+          <DialogHeader className="shrink-0 space-y-0 border-b border-stroke px-3.5 py-3 pe-12 text-left">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <DialogTitle className="text-[13px] font-semibold">
+                Prepare export
+              </DialogTitle>
+              <DialogDescription className="font-mono text-[10px] text-faint-foreground tabular-nums">
+                {summary.animationCount} sequence
+                {summary.animationCount === 1 ? "" : "s"} ·{" "}
+                {summary.frameCount} frame
+                {summary.frameCount === 1 ? "" : "s"}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+
+          <div className="grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)] overflow-hidden">
+            {/* Format: grouped the way the app groups formats. */}
+            <div className="min-h-0 overflow-y-auto border-e border-stroke p-2">
+              {FORMAT_GROUPS.map((group) => (
+                <div key={group.category}>
+                  <div className="px-1.5 pb-1 pt-2 text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                    {group.category}
+                  </div>
+                  {group.formats.map((exporter) => {
+                    const note = FORMAT_NOTES[exporter.id];
+                    const selected = mode === exporter.id;
+                    return (
+                      <button
+                        key={exporter.id}
+                        type="button"
+                        data-testid={`export-format-${exporter.id}`}
+                        onClick={() => setMode(exporter.id)}
+                        className={cn(
+                          "relative w-full rounded-md px-2 py-1.5 text-left transition-colors",
+                          selected ? "bg-brand-soft" : "hover:bg-row-hover",
+                        )}
+                      >
+                        {selected && (
+                          <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brand" />
+                        )}
+                        <span className="flex items-start gap-2">
+                          <FormatMark
+                            format={exporter.id}
+                            selected={selected}
+                            theme={theme}
+                            compact
+                          />
+                          <span className="min-w-0 pt-0.5">
+                            <span
+                              className={cn(
+                                "block truncate text-[11px]",
+                                selected
+                                  ? "font-semibold text-foreground"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {exporter.label}
+                            </span>
+                            {/* Only the selected format explains itself:
+                                twelve descriptions at once is a wall, not a
+                                choice. */}
+                            {selected && note?.note ? (
+                              <span className="mt-0.5 block text-[10px] leading-snug text-faint-foreground">
+                                {note.note}
+                              </span>
+                            ) : null}
                           </span>
-                        ))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* Consequences of that choice. */}
+            <div className="grid min-h-0 gap-3 overflow-y-auto p-3 content-start">
+              {/*
+                The map is height-capped, so its width is whatever its aspect
+                ratio makes of that cap — it can never fill a `1fr` column. Left
+                as one, the map hugged the left edge and the numbers floated off
+                at the far right with a few hundred pixels of nothing between
+                them. So the map takes exactly its own width and the readout
+                takes the rest: the two sit together, and the slack lands inside
+                a panel that is meant to be wide.
+              */}
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="min-w-0 shrink" style={{ flexBasis: mapWidth }}>
+                  <AtlasMap
+                    plan={activeSheet?.plan ?? null}
+                    rows={activeSheet?.rows}
+                    frameCount={activeSheet?.frameCount ?? 0}
+                    sequenceCount={activeSheet?.animationCount ?? 0}
+                    compact
+                    maxHeight={PREFLIGHT_MAP_HEIGHT}
+                  />
+                </div>
+                {/*
+                  Same border, tone and radius as the map beside it: one readout
+                  in two halves, the picture and its spec, rather than a card
+                  parked next to a picture. Narrow on purpose — three short rows
+                  need no more, and a panel stretched to the pane would put a
+                  hand's width of nothing between each label and its value.
+                */}
+                <dl className="grid min-w-40 max-w-3xs flex-1 content-start gap-2.5 rounded-md border border-stroke bg-surface-sunken p-2.5">
+                  <div>
+                    <dt className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                      {sheets.length > 1 && activeSheet
+                        ? activeSheet.name
+                        : "Atlas page"}
+                    </dt>
+                    {/* The headline: the one number here that decides whether
+                        the atlas fits the target, so it is the one that reads
+                        first. */}
+                    <dd className="mt-1 font-mono text-[15px] font-semibold leading-none tabular-nums">
+                      {activeSheet && activeSheet.imageWidth > 0
+                        ? `${activeSheet.imageWidth}×${activeSheet.imageHeight}`
+                        : "—"}
+                      <span className="ms-1 text-[9px] font-normal text-faint-foreground">
+                        px
+                      </span>
+                    </dd>
+                  </div>
+
+                  <div className="grid gap-1.5 border-t border-stroke pt-2.5">
+                    {[
+                      ["Pages", `${activeSheet?.pageCount ?? 0}`],
+                      ["Frames", `${activeSheet?.frameCount ?? 0}`],
+                      ...(sheets.length > 1
+                        ? ([["Sheets", `${sheets.length}`]] as const)
+                        : []),
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex items-baseline justify-between gap-2"
+                      >
+                        <dt className="text-[10px] text-faint-foreground">
+                          {label}
+                        </dt>
+                        <dd className="font-mono text-[11px] tabular-nums">
+                          {value}
+                        </dd>
                       </div>
-                      {validation.blocking && (
-                        <div className="mt-2 flex items-start gap-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2 py-1.5 text-destructive">
-                          <AlertTriangle size={13} className="mt-0.5" />
-                          <span>
-                            Export is blocked until validation errors are fixed.
-                          </span>
+                    ))}
+
+                    {/*
+                      Coverage only earns a row when it is bad enough to act on.
+                      At 74% there is nothing to do about it — the packer is
+                      already doing its job, and a number nobody acts on trains
+                      you to skip the whole panel. Under a fifth of the page in
+                      use means a smaller max size would still hold every frame,
+                      which is worth interrupting for, so that is the only time
+                      it appears.
+                    */}
+                    {(activeSheet?.imageWidth ?? 0) > 0 &&
+                      pageCoverage < WASTED_PAGE_COVERAGE && (
+                        <div className="flex items-baseline justify-between gap-2">
+                          <dt className="text-[10px] text-warn">Page used</dt>
+                          <dd className="font-mono text-[11px] text-warn tabular-nums">
+                            {Math.round(pageCoverage * 100)}%
+                          </dd>
                         </div>
                       )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-muted/40 px-2 py-2">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <SquareStack size={12} />
-                          Pages
-                        </span>
-                        <span className="text-lg font-semibold">
-                          {summary.pageCount}
-                        </span>
-                      </div>
-                      <div className="rounded-md bg-muted/40 px-2 py-2">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <ImageIcon size={12} />
-                          Frames
-                        </span>
-                        <span className="text-lg font-semibold">
-                          {summary.frameCount}
-                        </span>
-                      </div>
-                    </div>
                   </div>
-                </SectionShell>
+                </dl>
+              </div>
 
-                <SectionShell title="Validation" icon={ListChecks}>
-                  <ValidationMessages messages={validation.messages} />
-                </SectionShell>
-              </aside>
+              {/*
+                What lands in which spritesheet — and the packing that decides
+                how. Both live here because the map above answers for them: the
+                dialog is where you can see the consequence of a regroup or a
+                padding change without closing anything.
+              */}
+              {rows.length > 0 && (
+                <div className="grid gap-1.5">
+                  <div className="flex items-baseline">
+                    <span className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                      Sheets
+                    </span>
+                    <span className="ml-auto font-mono text-[10px] text-faint-foreground">
+                      {sheets.length} sheet{sheets.length === 1 ? "" : "s"} ·{" "}
+                      {summary.animationCount} sequence
+                      {summary.animationCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <SheetAssignments
+                    sheets={sheets}
+                    selected={Math.min(selectedSheet, sheets.length - 1)}
+                    onSelect={setSelectedSheet}
+                  />
+                </div>
+              )}
+
+              {rows.length > 0 && (
+                <div className="grid gap-1.5">
+                  <span className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                    Packing
+                  </span>
+                  <PackSettings />
+                </div>
+              )}
+
+              {/*
+                Same headlines as the rail, word for word. The dialog is the
+                surface with room for the detail, so it is the one that shows
+                it — progressive depth, never a reworded warning.
+              */}
+              {validation.messages.length > 0 && (
+                <div className="grid gap-1.5">
+                  {validation.messages.map((message, index) => (
+                    <ValidationNote key={index} message={message} showDetail />
+                  ))}
+                </div>
+              )}
+
+              <div className="grid gap-1.5">
+                <div className="flex items-baseline">
+                  <span className="text-[9px] font-medium uppercase tracking-wider text-faint-foreground">
+                    Writes
+                  </span>
+                  <span className="ml-auto font-mono text-[10px] text-faint-foreground">
+                    {outputFiles.length} file
+                    {outputFiles.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <WritesTree files={outputFiles} />
+              </div>
             </div>
-          </main>
-          <footer className="flex flex-wrap items-center justify-between gap-3 border-t bg-background px-4 py-3">
+          </div>
+
+          <footer className="flex shrink-0 items-center gap-2 border-t border-stroke bg-surface-high px-3.5 py-2.5">
             <Button
-              variant="outline"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px] text-muted-foreground"
               onClick={() =>
                 setAtlasOptions({
                   layout: DEFAULT_ATLAS_OPTIONS.layout,
@@ -1143,17 +1331,25 @@ export function ExportWorkbench() {
             >
               Reset atlas
             </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setPreflightOpen(false)}>
+            <div className="ml-auto flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-3 text-[11px]"
+                onClick={() => setPreflightOpen(false)}
+              >
                 Cancel
               </Button>
               <Button
+                size="sm"
+                className="h-7 gap-1.5 px-4 text-[11px] font-bold"
+                ref={exportButtonRef}
                 data-testid="preflight-export-button"
                 onClick={startExport}
                 disabled={validation.blocking || exporting}
               >
-                <Download size={14} />
-                Export
+                <Download size={13} />
+                {exporting ? "Exporting…" : "Export"}
               </Button>
             </div>
           </footer>

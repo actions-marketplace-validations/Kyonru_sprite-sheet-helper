@@ -2,8 +2,8 @@ import type { Exporter } from "@/types/file";
 import type { SpritesheetJSON } from "../assets";
 import {
   assertSinglePageAtlas,
-  buildSpritesheetAssets,
-  createNormalMapFile,
+  buildSheetAssets,
+  sheetImageFiles,
 } from "./helpers";
 import { toPascal, toSnake } from "../strings";
 
@@ -228,19 +228,31 @@ export const createBevySpritesheetRs = (
   return lines.join("\n");
 };
 
-export const createBevyMainRs = (json: SpritesheetJSON): string => {
+/**
+ * A `main.rs` that declares every sheet's module and spawns from the first.
+ *
+ * Each sheet is a module, so the identical type names inside them do not
+ * collide — the module path is the namespace, and every sheet's plugin is its
+ * own type, so they can all be added to the same app.
+ */
+export const createBevyMainRs = (
+  json: SpritesheetJSON,
+  moduleNames: string[] = ["spritesheet"],
+): string => {
   const firstPascal = toPascal(json.animations[0]?.name ?? "Idle");
+  const [first, ...rest] = moduleNames;
 
   return [
     `use bevy::prelude::*;`,
     ``,
-    `mod spritesheet;`,
-    `use spritesheet::{Animation, AnimatedSpriteBundle, SpritesheetPlugin};`,
+    ...moduleNames.map((name) => `mod ${name};`),
+    `use ${first}::{Animation, AnimatedSpriteBundle, SpritesheetPlugin};`,
     ``,
     `fn main() {`,
     `    App::new()`,
     `        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))`,
     `        .add_plugins(SpritesheetPlugin)`,
+    ...rest.map((name) => `        .add_plugins(${name}::SpritesheetPlugin)`),
     `        .add_systems(Startup, setup)`,
     `        .run();`,
     `}`,
@@ -261,28 +273,43 @@ export const bevyExporter: Exporter<"bevy"> = {
   id: "bevy",
   label: "Bevy",
 
-  async run({ exportedImages, includeNormalMap, atlasOptions }) {
-    const assets = await buildSpritesheetAssets(exportedImages, {
+  async run({
+    exportedImages,
+    includeNormalMap,
+    atlasOptions,
+    spritePostprocess,
+  }) {
+    const sheets = await buildSheetAssets(exportedImages, {
       includeNormalMap,
       atlasOptions,
-      imageName: "assets/spritesheet.png",
-      normalImageName: "assets/spritesheet_normal.png",
+      directory: "assets/",
       exporterId: "bevy",
+      spritePostprocess,
     });
-    assertSinglePageAtlas(assets, "Bevy");
-    const { json, manifestFile, base64PNG, normalBase64PNG } = assets;
+    for (const sheet of sheets) {
+      assertSinglePageAtlas(sheet.assets, "Bevy");
+    }
+    // Rust modules are snake_case, and a sheet name is not.
+    const moduleNames = sheets.map((sheet) => toSnake(sheet.base));
 
     return {
       filename: "bevy.zip",
       files: [
-        { name: "assets/spritesheet.png", content: base64PNG, base64: true },
-        ...createNormalMapFile(
-          normalBase64PNG,
-          "assets/spritesheet_normal.png",
-        ),
-        manifestFile,
-        { name: "src/spritesheet.rs", content: createBevySpritesheetRs(json) },
-        { name: "src/main.rs", content: createBevyMainRs(json) },
+        ...sheets.flatMap((sheet, index) => [
+          ...sheetImageFiles(sheet),
+          sheet.assets.manifestFile,
+          {
+            name: `src/${moduleNames[index]}.rs`,
+            content: createBevySpritesheetRs(
+              sheet.assets.json,
+              sheet.imagePath,
+            ),
+          },
+        ]),
+        {
+          name: "src/main.rs",
+          content: createBevyMainRs(sheets[0].assets.json, moduleNames),
+        },
         { name: "Cargo.toml.snippet", content: createBevyCargoToml() },
       ],
     };

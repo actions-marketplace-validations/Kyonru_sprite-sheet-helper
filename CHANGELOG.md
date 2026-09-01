@@ -5,6 +5,97 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0]
+
+### Added
+
+- Workflow animation sections with group toggles, collapse/expand controls, selected-section editing, and disabled animations collapsed by default.
+- Per-animation workflow capture timing overrides for frame interval and captured frame count.
+- Workflow force-in-place axis modes, including all axes, horizontal XZ, individual X/Y/Z axes, and none.
+- Reset Camera actions in the workflow camera draft and top camera panel context menu.
+- Animation renaming from the animation inspector.
+- Structured workflow direction metadata in exported spritesheet JSON and manifest files, including `directionalAnimations` groups.
+
+### Improved
+
+- Workflow animation settings are more compact and keep capture timing controls with animation-specific settings.
+- Manual animation recording names new sequence rows from the active animation instead of a generic `animation_#` label.
+- Orthographic workflow camera controls now treat distance as zoom in the UI, preview, and capture path.
+- Workflow preview and capture now preserve orthographic zoom and rotation consistently.
+- Hidden animations are skipped by default when generating workflow rows.
+
+### Fixed
+
+- Imported/copied animations now persist when saving/reloading projects and when exporting models.
+- Workflow capture now respects configured animation start/duration trimming instead of resetting clips to the full range.
+- Multiple workflow rows with the same animation name remain distinguishable in exports through model-aware direction grouping.
+
+## [0.6.0]
+
+### Added
+
+- Perspective/Orthographic main camera mode across editor, workflows, preview, and export.
+- Reversible animation hide/filter controls, including workflow filtering for disabled clips.
+- First-party inspector controls replacing Leva in main editor inspectors.
+- Export-time Spritesheet Postprocess with Outer Outline, Drop Shadow, Glow, Color Adjust, crisp-pixel outlines, animated preview, and normal-map-safe padding.
+- New outline options: EdgeOutline, Silhouette Outline, and renamed Selection Outline.
+- Model Fit to Camera action.
+
+### Improved
+
+- Workflow UI layout, preview resizing, animation settings, and force-in-place controls.
+- Inspector styling, numeric input editing, range sliders, and compact export/postprocess panels.
+- Materials Workbench sizing with a Pose Studio-like workspace.
+- Collapsible Spritesheet Postprocess and Recent Exports sections.
+
+### Fixed
+
+- Camera type switching bugs, including orthographic property updates and workflow preview/export consistency.
+- Workflow preview resizing, disabled-animation row generation, and record-button state during active captures.
+- Leva update-depth crashes and hidden-animation history watcher crashes.
+- Effect preset crashes after deleting effects and preview freezes from Depth Debug.
+- Spritesheet postprocess preview, zoom, before/after alignment, atlas metadata, normal padding, and project persistence.
+
+### Removed
+
+- Depth Debug preset/effect path.
+- Leva usage from migrated main editor inspector surfaces.
+
+### Documentation
+
+- Updated camera, workflows, animations, effects, exporting, normal maps, projects, troubleshooting, tutorial, README, and CLI docs.
+- Added Materials Workbench docs and navigation.
+
+## [0.5.0]
+
+### Added
+
+- Add model visibility
+- Import animations into selected model
+- Add in place option
+- add more Workflow config
+- Crash recovery with auto-saved project state and a restore/debug/reset dialog
+- Animation freeze options for imported clips
+- Warnings when browser storage is almost full or a save exceeds the quota
+- MIT license and contributing guide
+- Production readiness roadmap ("Path to v1.0")
+
+### Improved
+
+- Main panel UI: explorer header, empty states, hidden-model indicator, theme-aware icons
+- Crash dialog: technical details, copy-to-clipboard, clearer actions
+- CI: Dependabot, npm audit, coverage reporting
+- Test coverage ~65% → ~74% (history, scene stores, exporters, OPFS helpers)
+- Docs: storage limits and recovery troubleshooting
+
+### Fixed
+
+- Prevented model import crashes when loading or importing after sequence recording by strengthening model load-state handling and runtime cleanup.
+- Added model render/load error boundaries with toast notifications so failed FBX/GLB loads no longer break the scene.
+- Updated model import and material workflows to only expose actions/tools for fully loaded models.
+- Added rollback on import failure and expanded model removal cleanup to clear related animation/mixer state.
+- Added a regression E2E test covering FBX import after sequence capture without losing captured sequence rows.
+
 ## [0.4.1]
 
 ### Added

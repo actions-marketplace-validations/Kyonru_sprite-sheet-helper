@@ -25,6 +25,10 @@ export async function captureWorkflow(
     target,
     directionOverrides,
     normalMap,
+    captureNormalMaps,
+    forceAnimationsInPlace,
+    skipStepLabels,
+    fit,
     workflowTimeout,
     silent,
   }: WorkflowOptions,
@@ -37,12 +41,14 @@ export async function captureWorkflow(
       frameCount: number,
       cam?: number,
       n?: boolean,
+      cnm?: boolean,
       cameraAngle?: number,
     ) => {
       const { settings, images } = window.__SSH_BRIDGE__.stores;
       settings.getState().setExportWidth(w);
       settings.getState().setExportHeight(h);
-      settings.getState().setExportNormalMap(!!n);
+      const exportNormals = cnm ?? n ?? false;
+      settings.getState().setExportNormalMap(exportNormals);
 
       if (cam !== undefined) {
         settings.getState().setCameraDistance(cam);
@@ -59,6 +65,7 @@ export async function captureWorkflow(
     frames,
     cameraDistance,
     normalMap,
+    captureNormalMaps,
     cameraAngle,
   );
 
@@ -99,6 +106,12 @@ export async function captureWorkflow(
     ...(directionRotationOffset === undefined ? {} : { directionRotationOffset }),
     ...(target === undefined ? {} : { target }),
     ...(directionOverrides === undefined ? {} : { directionOverrides }),
+    ...(forceAnimationsInPlace === undefined
+      ? {}
+      : { forceAnimationsInPlace }),
+    ...(skipStepLabels === undefined ? {} : { skipStepLabels }),
+    ...(captureNormalMaps === undefined ? {} : { captureNormalMaps }),
+    ...(fit === undefined ? {} : { fit }),
   };
 
   await page.evaluate(

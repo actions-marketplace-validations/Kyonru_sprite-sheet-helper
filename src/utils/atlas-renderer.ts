@@ -76,7 +76,17 @@ export async function renderAtlasPages(
       const img = loaded[placement.rowIndex]?.[placement.frameIndex];
       if (!img) continue;
       drawExtrusion(ctx, img, placement, options.extrude);
-      ctx.drawImage(img, placement.x, placement.y, placement.w, placement.h);
+
+      // The sprite margin is transparent space inside the frame rect, so the
+      // frame is inset rather than stretched to fill it.
+      const margin = options.spriteMargin ?? 0;
+      ctx.drawImage(
+        img,
+        placement.x + margin,
+        placement.y + margin,
+        Math.max(1, placement.w - margin * 2),
+        Math.max(1, placement.h - margin * 2),
+      );
     }
 
     return canvas.toDataURL("image/png");

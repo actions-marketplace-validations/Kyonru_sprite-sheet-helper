@@ -6,10 +6,37 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Radii carry meaning, so the scale is mapped to roles rather than derived
+     arithmetically: rows 4, controls 5, tiles 10, dialogs 12. shadcn primitives
+     already reach for rounded-md (controls) and rounded-lg (surfaces), so this
+     mapping lands the whole system without touching each component. */
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  /* Surface ladder — depth is tonal, never a shadow. */
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-high: var(--surface-high);
+  --color-surface-highest: var(--surface-highest);
+
+  --color-faint-foreground: var(--faint-foreground);
+
+  /* The single brand accent. Distinct from shadcn's --accent, which is the
+     neutral hover pair and stays neutral. */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-line: var(--brand-line);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+
+  --color-stroke: var(--stroke);
+  --color-stroke-strong: var(--stroke-strong);
+  --color-row-hover: var(--row-hover);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -45,34 +72,60 @@
 :root {
   --radius: 0.625rem;
 
-  /* Soft warm off-white background instead of pure white */
-  --background: oklch(0.98 0.003 285);
-  --foreground: oklch(0.18 0.008 285.823);
+  /* Graphite Instrument — cool near-neutral at hue 248, minimal chroma.
+     The chrome sits beside the artwork being judged, so surfaces carry only
+     enough colour to read as a system. Surfaces and accent share one hue: 248,
+     the steel already used for selection. Amber and emerald stay reserved for
+     warning and ok, which is what they already mean across the app.
 
-  --card: oklch(0.975 0.004 285);
-  --card-foreground: oklch(0.18 0.008 285.823);
+     The ladder runs sunken < background < card < high < highest in both themes.
+     Only the direction of "further from the ground" flips. */
+  --surface-sunken: oklch(0.902 0.004 248);
+  --background: oklch(0.935 0.003 248);
+  --card: oklch(0.972 0.002 248);
+  --surface-high: oklch(0.99 0.002 248);
+  --surface-highest: oklch(0.999 0.001 248);
 
-  --popover: oklch(0.975 0.004 285);
-  --popover-foreground: oklch(0.18 0.008 285.823);
+  --foreground: oklch(0.28 0.012 248);
+  --card-foreground: oklch(0.28 0.012 248);
+  --popover: oklch(0.99 0.002 248);
+  --popover-foreground: oklch(0.28 0.012 248);
 
-  /* Slightly softened primary — deep slate, not pure black */
-  --primary: oklch(0.25 0.008 285.885);
-  --primary-foreground: oklch(0.97 0.003 285);
+  --primary: oklch(0.28 0.012 248);
+  --primary-foreground: oklch(0.99 0.002 248);
 
-  --secondary: oklch(0.94 0.004 286.375);
-  --secondary-foreground: oklch(0.25 0.008 285.885);
+  --secondary: oklch(0.925 0.004 248);
+  --secondary-foreground: oklch(0.28 0.012 248);
 
-  --muted: oklch(0.94 0.004 286.375);
-  --muted-foreground: oklch(0.48 0.018 285.938);
+  --muted: oklch(0.925 0.004 248);
+  --muted-foreground: oklch(0.5 0.014 248);
+  /* Units, counts, micro-labels, connectors. Tuned to 4.56:1 on --card so it
+     clears AA — it is deliberately not a "safe to be unreadable" tier. */
+  --faint-foreground: oklch(0.545 0.014 248);
 
-  --accent: oklch(0.94 0.004 286.375);
-  --accent-foreground: oklch(0.25 0.008 285.885);
+  /* shadcn's neutral hover pair. Stays neutral; the brand accent is separate. */
+  --accent: oklch(0.925 0.004 248);
+  --accent-foreground: oklch(0.28 0.012 248);
 
-  --destructive: oklch(0.55 0.22 27.325);
+  --brand: oklch(0.52 0.115 248);
+  --brand-foreground: oklch(0.99 0.002 248);
+  --brand-soft: oklch(0.52 0.115 248 / 12%);
+  --brand-line: oklch(0.52 0.115 248 / 36%);
 
-  --border: oklch(0.88 0.006 286.32);
-  --input: oklch(0.88 0.006 286.32);
-  --ring: oklch(0.62 0.018 286.067);
+  --ok: oklch(0.51 0.13 156);
+  --warn: oklch(0.52 0.115 78);
+  --warn-soft: oklch(0.52 0.115 78 / 10%);
+  --warn-line: oklch(0.52 0.115 78 / 30%);
+  --destructive: oklch(0.52 0.196 27);
+
+  --border: oklch(0.878 0.005 248);
+  /* Inputs sit below their surroundings: inset, so they read as receiving. */
+  --input: oklch(0.902 0.004 248);
+  --ring: oklch(0.52 0.115 248);
+
+  --stroke: oklch(0.28 0.012 248 / 10%);
+  --stroke-strong: oklch(0.28 0.012 248 / 20%);
+  --row-hover: oklch(0.28 0.012 248 / 5%);
 
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -80,19 +133,19 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
 
-  --sidebar: oklch(0.96 0.004 285);
-  --sidebar-foreground: oklch(0.18 0.008 285.823);
-  --sidebar-primary: oklch(0.25 0.008 285.885);
-  --sidebar-primary-foreground: oklch(0.97 0.003 285);
-  --sidebar-accent: oklch(0.92 0.005 286.375);
-  --sidebar-accent-foreground: oklch(0.25 0.008 285.885);
-  --sidebar-border: oklch(0.88 0.006 286.32);
-  --sidebar-ring: oklch(0.62 0.018 286.067);
+  --sidebar: oklch(0.952 0.003 248);
+  --sidebar-foreground: oklch(0.28 0.012 248);
+  --sidebar-primary: oklch(0.52 0.115 248);
+  --sidebar-primary-foreground: oklch(0.99 0.002 248);
+  --sidebar-accent: oklch(0.925 0.004 248);
+  --sidebar-accent-foreground: oklch(0.28 0.012 248);
+  --sidebar-border: oklch(0.878 0.005 248);
+  --sidebar-ring: oklch(0.52 0.115 248);
 
   /* RCT tree variables — light mode */
   --rct-color-tree-bg: transparent;
-  --rct-item-height: 28px;
-  --rct-color-search-highlight-bg: #c2d9f5;
+  --rct-item-height: 22px;
+  --rct-color-search-highlight-bg: #cfdcea;
 
   --rct-color-tree-focus-outline: transparent;
   --rct-item-margin: 1px;
@@ -100,14 +153,14 @@
   --rct-radius: 4px;
   --rct-bar-offset: 6px;
   --rct-bar-width: 4px;
-  --rct-bar-color: #2f7cd4;
-  --rct-focus-outline: #3a3a4a;
+  --rct-bar-color: var(--brand);
+  --rct-focus-outline: var(--faint-foreground);
 
-  --rct-color-focustree-item-selected-bg: #eaecf0;
-  --rct-color-focustree-item-hover-bg: #eaecf0;
+  --rct-color-focustree-item-selected-bg: color-mix(in oklch, var(--brand) 12%, transparent);
+  --rct-color-focustree-item-hover-bg: var(--row-hover);
   --rct-color-focustree-item-hover-text: inherit;
-  --rct-color-focustree-item-active-bg: #d8dce5;
-  --rct-color-focustree-item-active-text: #3a3d4a;
+  --rct-color-focustree-item-active-bg: color-mix(in oklch, var(--brand) 16%, transparent);
+  --rct-color-focustree-item-active-text: var(--foreground);
 
   --rct-arrow-size: 10px;
   --rct-arrow-container-size: 16px;
@@ -118,42 +171,60 @@
   --rct-search-width: 120px;
   --rct-search-height: 16px;
   --rct-search-padding: 8px;
-  --rct-search-border: #b0b4bd;
-  --rct-search-border-bottom: #2f7cd4;
-  --rct-search-bg: #f3f4f7;
-  --rct-search-text: #1a1c24;
+  --rct-search-border: #d5d7da;
+  --rct-search-border-bottom: #286da7;
+  --rct-search-bg: #dddfe1;
+  --rct-search-text: #2b2e33;
   --rct-search-text-offset: calc(var(--rct-search-padding) * 2 + 16px);
 }
 
 .dark {
-  /* Soft dark — warm-tinted deep slate, not pure black */
-  --background: oklch(0.16 0.007 285.823);
-  --foreground: oklch(0.93 0.005 285);
+  /* Graphite Instrument, dark. The viewport is always the darkest surface on
+     screen — chrome sits above it, which is the DCC convention and keeps the
+     artwork the subject rather than a hole in the interface. */
+  --surface-sunken: oklch(0.191 0.003 248);
+  --background: oklch(0.208 0.003 248);
+  --card: oklch(0.242 0.005 248);
+  --surface-high: oklch(0.276 0.006 248);
+  --surface-highest: oklch(0.315 0.007 248);
 
-  --card: oklch(0.21 0.008 285.885);
-  --card-foreground: oklch(0.93 0.005 285);
+  --foreground: oklch(0.93 0.004 248);
+  --card-foreground: oklch(0.93 0.004 248);
+  --popover: oklch(0.276 0.006 248);
+  --popover-foreground: oklch(0.93 0.004 248);
 
-  --popover: oklch(0.21 0.008 285.885);
-  --popover-foreground: oklch(0.93 0.005 285);
+  --primary: oklch(0.93 0.004 248);
+  --primary-foreground: oklch(0.208 0.003 248);
 
-  /* Lighter but still soft primary for dark mode */
-  --primary: oklch(0.88 0.006 286.32);
-  --primary-foreground: oklch(0.22 0.008 285.885);
+  --secondary: oklch(0.276 0.006 248);
+  --secondary-foreground: oklch(0.93 0.004 248);
 
-  --secondary: oklch(0.28 0.008 286.033);
-  --secondary-foreground: oklch(0.93 0.005 285);
+  --muted: oklch(0.276 0.006 248);
+  --muted-foreground: oklch(0.706 0.011 248);
+  /* 4.50:1 on --card — clears AA, so units and micro-labels stay readable. */
+  --faint-foreground: oklch(0.62 0.013 248);
 
-  --muted: oklch(0.28 0.008 286.033);
-  --muted-foreground: oklch(0.65 0.018 286.067);
+  --accent: oklch(0.315 0.007 248);
+  --accent-foreground: oklch(0.93 0.004 248);
 
-  --accent: oklch(0.28 0.008 286.033);
-  --accent-foreground: oklch(0.93 0.005 285);
+  --brand: oklch(0.704 0.1 251);
+  --brand-foreground: oklch(0.195 0.026 247);
+  --brand-soft: oklch(0.704 0.1 251 / 14%);
+  --brand-line: oklch(0.704 0.1 251 / 34%);
 
-  --destructive: oklch(0.67 0.18 22.216);
+  --ok: oklch(0.74 0.106 156);
+  --warn: oklch(0.785 0.111 78);
+  --warn-soft: oklch(0.785 0.111 78 / 10%);
+  --warn-line: oklch(0.785 0.111 78 / 26%);
+  --destructive: oklch(0.649 0.161 23);
 
-  --border: oklch(0.93 0.005 285 / 12%);
-  --input: oklch(0.93 0.005 285 / 16%);
-  --ring: oklch(0.5 0.018 285.938);
+  --border: oklch(0.93 0.004 248 / 12%);
+  --input: oklch(0.191 0.003 248);
+  --ring: oklch(0.704 0.1 251);
+
+  --stroke: oklch(1 0 0 / 6.5%);
+  --stroke-strong: oklch(1 0 0 / 13%);
+  --row-hover: oklch(1 0 0 / 5%);
 
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -161,38 +232,34 @@
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
 
-  --sidebar: oklch(0.21 0.008 285.885);
-  --sidebar-foreground: oklch(0.93 0.005 285);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.93 0.005 285);
-  --sidebar-accent: oklch(0.28 0.008 286.033);
-  --sidebar-accent-foreground: oklch(0.93 0.005 285);
-  --sidebar-border: oklch(0.93 0.005 285 / 12%);
-  --sidebar-ring: oklch(0.5 0.018 285.938);
+  --sidebar: oklch(0.228 0.004 248);
+  --sidebar-foreground: oklch(0.93 0.004 248);
+  --sidebar-primary: oklch(0.704 0.1 251);
+  --sidebar-primary-foreground: oklch(0.195 0.026 247);
+  --sidebar-accent: oklch(0.315 0.007 248);
+  --sidebar-accent-foreground: oklch(0.93 0.004 248);
+  --sidebar-border: oklch(0.93 0.004 248 / 12%);
+  --sidebar-ring: oklch(0.704 0.1 251);
 
   /* RCT tree variables — dark mode */
-  --rct-color-search-highlight-bg: #2a4d7a;
-  --rct-bar-color: #6aadee;
-  --rct-focus-outline: #aab0c0;
+  --rct-color-search-highlight-bg: #2c4058;
+  --rct-bar-color: var(--brand);
+  --rct-focus-outline: var(--faint-foreground);
 
-  --rct-color-focustree-item-selected-bg: #2c2f3a;
-  --rct-color-focustree-item-hover-bg: #2c2f3a;
+  --rct-color-focustree-item-selected-bg: color-mix(in oklch, var(--brand) 14%, transparent);
+  --rct-color-focustree-item-hover-bg: var(--row-hover);
   --rct-color-focustree-item-hover-text: inherit;
-  --rct-color-focustree-item-active-bg: #35394a;
-  --rct-color-focustree-item-active-text: #c8ccd8;
+  --rct-color-focustree-item-active-bg: color-mix(in oklch, var(--brand) 18%, transparent);
+  --rct-color-focustree-item-active-text: var(--foreground);
 
-  --rct-search-border: #4a4f60;
-  --rct-search-border-bottom: #6aadee;
-  --rct-search-bg: #1e2130;
-  --rct-search-text: #d0d4e0;
+  --rct-search-border: #3b3d41;
+  --rct-search-border-bottom: #6197ca;
+  --rct-search-bg: #17181a;
+  --rct-search-text: #dddee1;
 }
 
 .rct-tree-item-arrow svg {
-  stroke: #2a2d3a;
-}
-
-.dark .rct-tree-item-arrow svg {
-  stroke: #f3f4f7;
+  stroke: var(--faint-foreground);
 }
 
 @layer base {
@@ -205,6 +272,21 @@
 }
 
 @layer utilities {
+  /*
+    Transparency reads as a checkerboard in every sprite tool, so it is the
+    app's signature texture. Neutral by construction: it must never tint the
+    artwork sitting on top of it.
+  */
+  .checkerboard {
+    background-color: var(--surface-sunken);
+    background-image: repeating-conic-gradient(
+      color-mix(in oklch, var(--foreground) 7%, transparent) 0% 25%,
+      transparent 0% 50%
+    );
+    background-size: 16px 16px;
+    background-position: 0 0;
+  }
+
   /* Hide scrollbar for Chrome, Safari and Opera */
   .no-scrollbar::-webkit-scrollbar {
     display: none;

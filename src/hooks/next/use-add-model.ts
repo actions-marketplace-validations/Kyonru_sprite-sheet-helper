@@ -9,21 +9,65 @@ import { toast } from "sonner";
 export const useAddModel = (select = true) => {
   const addEntity = useEntitiesStore((state) => state.addEntity);
   const selectEntity = useEntitiesStore((state) => state.selectEntity);
+  const unselectEntity = useEntitiesStore((state) => state.unselectEntity);
+  const removeEntity = useEntitiesStore((state) => state.removeEntity);
   const loadModel = useModelsStore((state) => state.loadFromFile);
+  const removeModel = useModelsStore((state) => state.removeModel);
   const initTransform = useTransformsStore((state) => state.initTransform);
+  const removeTransform = useTransformsStore((state) => state.removeTransform);
   const pushBatch = useHistoryStore((state) => state.pushBatch);
 
+  const initialTransform: Transform = {
+    position: [0, 0.8, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+  };
+
   return async (file: File, name?: string) => {
+    let uuid: string | undefined;
+    const waitForModelLoad = async (modelUuid: string) => {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const model = useModelsStore.getState().models[modelUuid];
+        if (!model) {
+          throw new Error("Model removed before load completed");
+        }
+
+        if (model.loadState === "loaded") return;
+
+        if (model.loadState === "error") {
+          throw new Error(model.errorMessage ?? "Model load failed");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+
+      throw new Error("Timed out while loading model");
+    };
+
+    const rollback = () => {
+      if (!uuid) return;
+
+      const selectedModel = useEntitiesStore.getState().selected;
+      if (selectedModel === uuid) {
+        unselectEntity();
+      }
+
+      removeModel(uuid);
+      removeTransform(uuid);
+      removeEntity(uuid);
+    };
+
     try {
       const label = name ?? file.name ?? "Model";
-      const uuid = addEntity("model", label);
+      uuid = addEntity("model", label);
 
-      const transform: Partial<Transform> = {
-        position: [0, 0.8, 0],
-      };
+      initTransform(uuid, {
+        position: initialTransform.position,
+      });
 
-      initTransform(uuid, transform);
       await loadModel(uuid, file);
+      await waitForModelLoad(uuid);
 
       if (select) {
         selectEntity(uuid);
@@ -40,6 +84,9 @@ export const useAddModel = (select = true) => {
           from: null,
           to: entity,
           apply: ({ dir }) => {
+            if (!uuid) {
+              return;
+            }
             if (dir === "forward") {
               useEntitiesStore.getState().restoreEntity(entity);
             } else {
@@ -52,14 +99,17 @@ export const useAddModel = (select = true) => {
           uuid,
           from: null,
           to: {
-            position: transform.position!,
+            position: initialTransform.position,
             rotation: [0, 0, 0],
             scale: [1, 1, 1],
           },
           apply: ({ dir }) => {
+            if (!uuid) {
+              return;
+            }
             if (dir === "forward") {
               useTransformsStore.getState().initTransform(uuid, {
-                position: [0, 0, 0],
+                position: initialTransform.position,
               });
             } else {
               useTransformsStore.getState().removeTransform(uuid);
@@ -72,6 +122,7 @@ export const useAddModel = (select = true) => {
 
       return uuid;
     } catch (e) {
+      rollback();
       toast.error(`Failed to load model: ${(e as Error).message || e}`);
     }
   };

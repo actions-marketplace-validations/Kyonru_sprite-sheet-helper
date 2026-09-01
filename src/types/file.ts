@@ -1,3 +1,5 @@
+import type { SpritePostprocessSnapshot } from "./sprite-postprocess";
+
 export type FileType = "glb" | "gltf" | "obj" | "fbx";
 export const ExportFormats = [
   "zip",
@@ -24,6 +26,14 @@ export interface AtlasOptions {
   scale: number;
   maxAtlasSize: number;
   allowMultiPage: boolean;
+  /**
+   * Transparent pixels added per side *inside* each frame rect.
+   *
+   * Distinct from `padding`, which is a gutter between slots and sits outside
+   * the rect an engine reads, and from `extrude`, which fills that gutter with
+   * edge pixels. This margin travels with the sprite.
+   */
+  spriteMargin: number;
 }
 
 export interface ExportRow {
@@ -34,6 +44,39 @@ export interface ExportRow {
   frameWidth: number;
   frameHeight: number;
   fps: number;
+  /**
+   * Which spritesheet this sequence is packed into.
+   *
+   * Sequences sharing a name share an atlas; the rest are packed and written
+   * separately. Absent means the default sheet, which is every sequence until
+   * someone splits them — so a project that never touches this exports exactly
+   * as it did before sheets existed.
+   */
+  sheet?: string;
+  metadata?: ExportRowMetadata;
+}
+
+export interface ExportRowMetadata {
+  workflow?: ExportRowWorkflowMetadata;
+}
+
+export interface ExportRowWorkflowMetadata {
+  workflowId: string;
+  workflowLabel: string;
+  modelUuid?: string;
+  animationName: string;
+  directionLabel: string;
+}
+
+export interface DirectionalAnimationGroup {
+  name: string;
+  workflowId: string;
+  workflowLabel: string;
+  modelUuid?: string;
+  directions: {
+    label: string;
+    animation: string;
+  }[];
 }
 
 export type ExportContext = {
@@ -41,6 +84,7 @@ export type ExportContext = {
   frameDelay: number;
   includeNormalMap: boolean;
   atlasOptions?: Partial<AtlasOptions>;
+  spritePostprocess?: SpritePostprocessSnapshot;
 };
 
 export type ExportFile = {

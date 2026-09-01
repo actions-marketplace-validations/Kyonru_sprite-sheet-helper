@@ -11,9 +11,16 @@ import {
 import { useSceneStore } from "@/components/panels/scene/store";
 import { useSettingsStore } from "@/store/next/settings";
 import { useImagesStore } from "@/store/next/images";
+import { useSpritePostprocessStore } from "@/store/next/sprite-postprocess";
+import { useModelsStore } from "@/store/next/models";
+import { useEntitiesStore } from "@/store/next/entities";
 import type { ExportFormat } from "@/types/file";
 import { exporters } from "@/utils/exports";
-import { buildZip, getNormalCoverage } from "@/utils/exports/helpers";
+import {
+  buildZip,
+  fpsFromCaptureInterval,
+  getNormalCoverage,
+} from "@/utils/exports/helpers";
 import { downloadFile } from "@/utils/assets";
 import { toast } from "sonner";
 import { normalizeAtlasOptions } from "@/utils/atlas";
@@ -22,6 +29,7 @@ import {
   validateExportRequest,
 } from "@/utils/export-validation";
 import { addExportHistoryEntry } from "@/utils/export-history";
+import { getActiveAnimationSequenceLabel } from "@/utils/animation-sequence-label";
 
 const NORMAL_MAP_EXPORT_FORMATS = new Set<ExportFormat>([
   "spritesheet",
@@ -35,6 +43,33 @@ const NORMAL_MAP_EXPORT_FORMATS = new Set<ExportFormat>([
   "raylib",
   "unity",
 ]);
+
+function getCaptureTiming(
+  payload: CaptureStartPayload | null | undefined,
+  defaults: {
+    intervalMs: number;
+    frameCount: number;
+  },
+) {
+  return {
+    intervalMs: Math.max(
+      1,
+      Math.round(
+        Number.isFinite(payload?.frameIntervalMs)
+          ? (payload?.frameIntervalMs ?? defaults.intervalMs)
+          : defaults.intervalMs,
+      ),
+    ),
+    frameCount: Math.max(
+      1,
+      Math.round(
+        Number.isFinite(payload?.frameCount)
+          ? (payload?.frameCount ?? defaults.frameCount)
+          : defaults.frameCount,
+      ),
+    ),
+  };
+}
 
 export const useExport = () => {
   const images = useRef<{ name: string; dataURL: string }[]>([]);
@@ -52,6 +87,9 @@ export const useExport = () => {
   const atlasLayout = useSettingsStore((state) => state.atlasLayout);
   const atlasPadding = useSettingsStore((state) => state.atlasPadding);
   const atlasBleed = useSettingsStore((state) => state.atlasBleed);
+  const atlasSpriteMargin = useSettingsStore(
+    (state) => state.atlasSpriteMargin,
+  );
   const atlasScale = useSettingsStore((state) => state.atlasScale);
   const maxAtlasSize = useSettingsStore((state) => state.maxAtlasSize);
   const allowMultiPage = useSettingsStore((state) => state.allowMultiPage);
@@ -79,10 +117,12 @@ export const useExport = () => {
     const originalOverrideMaterial = scene.overrideMaterial;
 
     try {
-      if (exportWidth && exportHeight) {
-        gl.setSize(exportWidth, exportHeight, true);
-      }
       gl.setPixelRatio(1);
+      composer.setSize(
+        exportWidth || originalSize.x,
+        exportHeight || originalSize.y,
+        true,
+      );
       gl.setRenderTarget(null);
 
       composer.render();
@@ -121,7 +161,7 @@ export const useExport = () => {
       scene.overrideMaterial = originalOverrideMaterial;
       gl.setClearColor(originalClearColor, originalClearAlpha);
       gl.setPixelRatio(originalPixelRatio);
-      gl.setSize(originalSize.x, originalSize.y);
+      composer.setSize(originalSize.x, originalSize.y, true);
       gl.setRenderTarget(originalTarget);
 
       composer.render();
@@ -146,6 +186,7 @@ export const useExport = () => {
         layout: atlasLayout,
         padding: atlasPadding,
         extrude: atlasBleed,
+        spriteMargin: atlasSpriteMargin,
         scale: atlasScale,
         maxAtlasSize,
         allowMultiPage,
@@ -181,6 +222,10 @@ export const useExport = () => {
           frameDelay,
           includeNormalMap: exportNormalMap,
           atlasOptions,
+          spritePostprocess:
+            typeof payload === "object"
+              ? payload.spritePostprocess
+              : useSpritePostprocessStore.getState().getSnapshot(),
         });
 
         if (exportNormalMap && NORMAL_MAP_EXPORT_FORMATS.has(exportType)) {
@@ -229,6 +274,7 @@ export const useExport = () => {
     [
       allowMultiPage,
       atlasBleed,
+      atlasSpriteMargin,
       atlasLayout,
       atlasPadding,
       atlasScale,
@@ -245,43 +291,59 @@ export const useExport = () => {
       if (!gl) return;
       if (intervalRef.current) clearInterval(intervalRef.current);
 
+      const modelState = useModelsStore.getState();
+      const sequenceLabel =
+        payload?.label ??
+        getActiveAnimationSequenceLabel({
+          animations: modelState.animations,
+          clips: modelState.clips,
+          selectedUuid: useEntitiesStore.getState().selected,
+        }) ??
+        `animation_${lastIndex.current + 1}`;
+      const capturePayload = { ...(payload ?? {}), label: sequenceLabel };
+      const captureTiming = getCaptureTiming(capturePayload, {
+        intervalMs: intervals,
+        frameCount: iterations,
+      });
+
       images.current = [];
       normalImages.current = [];
-      activeCaptureRef.current = payload ?? {};
+      activeCaptureRef.current = capturePayload;
 
       intervalRef.current = scheduleInterval(
         captureScreenshotData,
-        intervals,
-        iterations,
+        captureTiming.intervalMs,
+        captureTiming.frameCount,
         () => {
           PubSub.emit(EventType.ASSETS_CREATION_PROGRESS, {
-            label: payload?.label,
-            workflowRunId: payload?.workflowRunId,
+            label: capturePayload.label,
+            workflowRunId: capturePayload.workflowRunId,
             capturedFrames: images.current.length,
-            expectedFrames: iterations,
+            expectedFrames: captureTiming.frameCount,
           });
         },
         async () => {
           intervalRef.current = null;
           PubSub.emit(EventType.STOP_ASSETS_CREATION, {
-            label: payload?.label,
-            workflowRunId: payload?.workflowRunId,
+            label: capturePayload.label,
+            workflowRunId: capturePayload.workflowRunId,
             capturedFrames: images.current.length,
-            expectedFrames: iterations,
+            expectedFrames: captureTiming.frameCount,
             status: "done",
           });
           activeCaptureRef.current = null;
 
           addImages(
             Date.now().toString(),
-            payload?.label ?? `animation_${lastIndex.current + 1}`,
+            capturePayload.label,
             images.current.map((img) => img.dataURL),
             exportNormalMap
               ? normalImages.current.map((img) => img.dataURL)
               : undefined,
             exportWidth,
             exportHeight,
-            Math.round(1000 / intervals),
+            fpsFromCaptureInterval(captureTiming.intervalMs),
+            capturePayload.rowMetadata,
           );
           lastIndex.current += 1;
         },
@@ -308,18 +370,22 @@ export const useExport = () => {
     }
 
     const payload = activeCaptureRef.current;
+    const captureTiming = getCaptureTiming(payload, {
+      intervalMs: intervals,
+      frameCount: iterations,
+    });
     PubSub.emit(EventType.STOP_ASSETS_CREATION, {
       label: payload?.label,
       workflowRunId: payload?.workflowRunId,
       capturedFrames: images.current.length,
-      expectedFrames: iterations,
+      expectedFrames: captureTiming.frameCount,
       status: "cancelled",
     });
 
     activeCaptureRef.current = null;
     images.current = [];
     normalImages.current = [];
-  }, [iterations]);
+  }, [intervals, iterations]);
 
   const addScreenshot = useCallback(() => {
     if (!gl) return;
@@ -339,7 +405,7 @@ export const useExport = () => {
       exportNormalMap ? normalImages.current[0]?.dataURL : undefined,
       width,
       height,
-      Math.round(1000 / intervals),
+      fpsFromCaptureInterval(intervals),
     );
     images.current = [];
     normalImages.current = [];
@@ -363,7 +429,7 @@ export const useExport = () => {
   }, [addScreenshot]);
 
   const onNewRow = useCallback(() => {
-    createEmptyRow(exportWidth, exportHeight, Math.round(1000 / intervals));
+    createEmptyRow(exportWidth, exportHeight, fpsFromCaptureInterval(intervals));
   }, [createEmptyRow, exportWidth, exportHeight, intervals]);
 
   useEffect(() => {
