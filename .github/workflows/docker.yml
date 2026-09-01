@@ -171,7 +171,7 @@ jobs:
 
       - name: Upload example project output
         if: startsWith(env.RELEASE_TAG, 'v') && always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: example-project-output
           path: |
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload container smoke outputs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: docker-smoke-output
           path: |
