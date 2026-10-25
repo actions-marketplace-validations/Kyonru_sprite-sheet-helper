@@ -9,7 +9,7 @@ export type PoseStudioTool =
   | "global-rotate"
   | "global-move";
 
-export type PoseStudioInspectorTab = "assist" | "mapping" | "edit" | "save";
+export type PoseStudioInspectorTab = "assist" | "mapping" | "edit" | "review";
 
 export type PoseStudioOverlayKey =
   | "sourceSkeleton"
@@ -21,6 +21,19 @@ export interface PoseFrameQualityMarker {
   score: number;
   label: PoseQualityLabel;
   warnings: string[];
+  /** Bone keys that reused a previous rotation because visibility was low. */
+  heldBones: string[];
+  /** A clip-relative landmark discontinuity begins on this frame. */
+  landmarkJump?: boolean;
+}
+
+export interface PoseCaptureQualitySummary {
+  frameCount: number;
+  averageScore: number;
+  label: PoseQualityLabel;
+  heldFrameCount: number;
+  heldBoneCount: number;
+  landmarkJumpCount: number;
 }
 
 export interface PoseStudioUiState {
@@ -104,6 +117,59 @@ export function poseStudioUiReducer(
   }
 }
 
+/**
+ * The two questions a tool actually answers.
+ *
+ * The palette offered six flat buttons — Select, FK Rotate, FK Move, IK, Global
+ * Rotate, Global Move — which is one list for two independent choices, named
+ * after the rigging technique rather than the thing being moved. Splitting them
+ * gives four targets and a gizmo, so "rotate one bone" and "rotate the whole
+ * pose" stop looking like unrelated modes. The underlying tool union is
+ * unchanged: everything downstream still reads a single `PoseStudioTool`.
+ */
+export type PoseEditTarget = "select" | "bone" | "ik" | "pose";
+export type PoseGizmo = "rotate" | "move";
+
+export function getPoseEditTarget(tool: PoseStudioTool): PoseEditTarget {
+  switch (tool) {
+    case "fk-rotate":
+    case "fk-move":
+      return "bone";
+    case "ik":
+      return "ik";
+    case "global-rotate":
+    case "global-move":
+      return "pose";
+    default:
+      return "select";
+  }
+}
+
+export function getPoseGizmo(tool: PoseStudioTool): PoseGizmo {
+  return tool === "fk-move" || tool === "global-move" ? "move" : "rotate";
+}
+
+/** IK has no gizmo choice — dragging the effector is the whole interaction. */
+export function composePoseTool(
+  target: PoseEditTarget,
+  gizmo: PoseGizmo,
+): PoseStudioTool {
+  switch (target) {
+    case "bone":
+      return gizmo === "move" ? "fk-move" : "fk-rotate";
+    case "pose":
+      return gizmo === "move" ? "global-move" : "global-rotate";
+    case "ik":
+      return "ik";
+    default:
+      return "select";
+  }
+}
+
+export function poseGizmoApplies(target: PoseEditTarget): boolean {
+  return target === "bone" || target === "pose";
+}
+
 export function getEditModeForTool(tool: PoseStudioTool) {
   return tool === "ik" ? "ik" : "fk";
 }
@@ -164,10 +230,21 @@ export function trimQualityMarkersBefore(
 ) {
   return markers
     .filter((marker) => marker.frameIndex >= firstFrameIndex)
-    .map((marker) => ({
-      ...marker,
-      frameIndex: marker.frameIndex - firstFrameIndex,
-    }));
+    .map((marker) => {
+      const frameIndex = marker.frameIndex - firstFrameIndex;
+      return {
+        ...marker,
+        frameIndex,
+        // A discontinuity belongs to the transition from the preceding frame.
+        // Once that frame is trimmed, the new first frame cannot be a jump.
+        ...(marker.landmarkJump === undefined
+          ? {}
+          : {
+              landmarkJump:
+                frameIndex === 0 ? false : marker.landmarkJump,
+            }),
+      };
+    });
 }
 
 export function trimQualityMarkersAfter(
@@ -175,6 +252,45 @@ export function trimQualityMarkersAfter(
   lastFrameIndex: number,
 ) {
   return markers.filter((marker) => marker.frameIndex <= lastFrameIndex);
+}
+
+/** Add whole-clip discontinuity results without changing the captured poses. */
+export function markLandmarkJumps(
+  markers: PoseFrameQualityMarker[],
+  frameIndices: readonly number[],
+): PoseFrameQualityMarker[] {
+  const jumps = new Set(frameIndices);
+  return markers.map((marker) => ({
+    ...marker,
+    landmarkJump: jumps.has(marker.frameIndex),
+  }));
+}
+
+export function summarizePoseCaptureQuality(
+  markers: readonly PoseFrameQualityMarker[],
+  frameCount = markers.length,
+): PoseCaptureQualitySummary {
+  const averageScore =
+    markers.length > 0
+      ? markers.reduce((sum, marker) => sum + marker.score, 0) / markers.length
+      : 0;
+
+  return {
+    frameCount,
+    averageScore,
+    label:
+      averageScore >= 0.78
+        ? "Good"
+        : averageScore >= 0.52
+          ? "Usable"
+          : "Poor",
+    heldFrameCount: markers.filter((marker) => marker.heldBones.length > 0).length,
+    heldBoneCount: markers.reduce(
+      (sum, marker) => sum + marker.heldBones.length,
+      0,
+    ),
+    landmarkJumpCount: markers.filter((marker) => marker.landmarkJump).length,
+  };
 }
 
 export function markerTone(label: PoseQualityLabel | undefined) {

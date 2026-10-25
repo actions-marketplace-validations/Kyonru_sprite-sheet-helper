@@ -5,6 +5,8 @@ import type { BoneRemap } from "./bone-remap";
 // ── MediaPipe landmark indices ─────────────────────────────────────────────
 const IDX = {
   NOSE: 0,
+  LEFT_EAR: 7,
+  RIGHT_EAR: 8,
   LEFT_SHOULDER: 11,
   RIGHT_SHOULDER: 12,
   LEFT_ELBOW: 13,
@@ -42,6 +44,16 @@ export interface JointPositions {
   leftFootIndex: THREE.Vector3;
   rightFootIndex: THREE.Vector3;
   nose: THREE.Vector3;
+  /**
+   * Midpoint of the ears.
+   *
+   * Preferred over the nose for aiming the neck and head. The nose sits well
+   * FORWARD of the head's axis, so aiming a bone whose rest direction is
+   * "straight up" at the nose books that fixed anatomical offset as head-down
+   * rotation. Measured on a walking clip, aiming at the nose produced 56.4
+   * degrees of neck-to-head lean where a walker shows almost none.
+   */
+  earCenter: THREE.Vector3;
   hipCenter: THREE.Vector3;
   shoulderCenter: THREE.Vector3;
 }
@@ -78,6 +90,9 @@ export function landmarksToJointPositions(
     leftFootIndex: toLH(lm[IDX.LEFT_FOOT_INDEX]),
     rightFootIndex: toLH(lm[IDX.RIGHT_FOOT_INDEX]),
     nose: toLH(lm[IDX.NOSE]),
+    earCenter: toLH(lm[IDX.LEFT_EAR])
+      .add(toLH(lm[IDX.RIGHT_EAR]))
+      .multiplyScalar(0.5),
     hipCenter: lh.clone().add(rh).multiplyScalar(0.5),
     shoulderCenter: ls.clone().add(rs).multiplyScalar(0.5),
   };
@@ -103,143 +118,3 @@ export interface PoseBoneData {
   bones: BoneFrame[];
 }
 
-// Scratch objects to avoid GC pressure during recording
-const _v1 = new THREE.Vector3();
-const _v2 = new THREE.Vector3();
-const _v3 = new THREE.Vector3();
-const _m4 = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
-
-/** Build a quaternion that rotates world +Y axis toward (to - from). */
-function dirQuat(from: THREE.Vector3, to: THREE.Vector3): THREE.Quaternion {
-  _v1.copy(to).sub(from);
-  if (_v1.lengthSq() < 1e-8) return new THREE.Quaternion();
-  _v1.normalize();
-
-  // Choose an up reference that's not parallel to _v1
-  _v2.set(0, 1, 0);
-  if (Math.abs(_v1.dot(_v2)) > 0.99) _v2.set(0, 0, 1);
-
-  // Build a look-at matrix pointing +Z = _v1, then rotate so +Y = _v1
-  _v3.crossVectors(_v2, _v1).normalize();
-  _v2.crossVectors(_v1, _v3).normalize();
-  _m4.makeBasis(_v3, _v2, _v1);
-  _q.setFromRotationMatrix(_m4);
-  // Adjust: makeBasis gives forward=+Z, we want the bone's +Y to point toward child
-  _q.multiply(
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)),
-  );
-  return _q.clone();
-}
-
-/**
- * Compute approximate world-space bone quaternions from world landmarks.
- * Used for recording frames. These are stored in PoseFrame and later
- * baked into the AnimationClip.
- *
- * NOTE: For the live 3D preview, use applyPoseToSkeleton() in model-preview
- * which has access to actual bone objects and computes proper local rotations.
- */
-export function landmarksToBones(
-  lm: NormalizedLandmark[],
-  remap?: BoneRemap,
-): PoseBoneData {
-  const j = landmarksToJointPositions(lm);
-
-  const hipsPos = j.hipCenter.clone();
-
-  // Hips orientation: right × up = forward
-  const hipRight = _v1.copy(j.rightHip).sub(j.leftHip).normalize().clone();
-  const hipUp = _v2.copy(j.shoulderCenter).sub(j.hipCenter).normalize().clone();
-  const hipFwd = new THREE.Vector3().crossVectors(hipRight, hipUp).normalize();
-  const hipsQuat = new THREE.Quaternion().setFromRotationMatrix(
-    _m4.lookAt(new THREE.Vector3(), hipFwd, hipUp),
-  );
-
-  const spineDir = dirQuat(j.hipCenter, j.shoulderCenter);
-
-  // Uniform names — callers pass a remap to override
-  const R = remap;
-  const n = (key: keyof BoneRemap) => R?.[key] ?? key;
-
-  return {
-    hips: { boneName: n("hips"), position: hipsPos, quaternion: hipsQuat },
-    bones: [
-      {
-        boneKey: "spine",
-        boneName: n("spine"),
-        quaternion: spineDir,
-      },
-      {
-        boneKey: "spine1",
-        boneName: n("spine1"),
-        quaternion: spineDir,
-      },
-      {
-        boneKey: "spine2",
-        boneName: n("spine2"),
-        quaternion: spineDir,
-      },
-      {
-        boneKey: "leftShoulder",
-        boneName: n("leftShoulder"),
-        quaternion: dirQuat(j.shoulderCenter, j.leftShoulder),
-      },
-      {
-        boneKey: "rightShoulder",
-        boneName: n("rightShoulder"),
-        quaternion: dirQuat(j.shoulderCenter, j.rightShoulder),
-      },
-      {
-        boneKey: "leftArm",
-        boneName: n("leftArm"),
-        quaternion: dirQuat(j.leftShoulder, j.leftElbow),
-      },
-      {
-        boneKey: "rightArm",
-        boneName: n("rightArm"),
-        quaternion: dirQuat(j.rightShoulder, j.rightElbow),
-      },
-      {
-        boneKey: "leftForeArm",
-        boneName: n("leftForeArm"),
-        quaternion: dirQuat(j.leftElbow, j.leftWrist),
-      },
-      {
-        boneKey: "rightForeArm",
-        boneName: n("rightForeArm"),
-        quaternion: dirQuat(j.rightElbow, j.rightWrist),
-      },
-      {
-        boneKey: "leftUpLeg",
-        boneName: n("leftUpLeg"),
-        quaternion: dirQuat(j.leftHip, j.leftKnee),
-      },
-      {
-        boneKey: "rightUpLeg",
-        boneName: n("rightUpLeg"),
-        quaternion: dirQuat(j.rightHip, j.rightKnee),
-      },
-      {
-        boneKey: "leftLeg",
-        boneName: n("leftLeg"),
-        quaternion: dirQuat(j.leftKnee, j.leftAnkle),
-      },
-      {
-        boneKey: "rightLeg",
-        boneName: n("rightLeg"),
-        quaternion: dirQuat(j.rightKnee, j.rightAnkle),
-      },
-      {
-        boneKey: "leftFoot",
-        boneName: n("leftFoot"),
-        quaternion: dirQuat(j.leftAnkle, j.leftFootIndex),
-      },
-      {
-        boneKey: "rightFoot",
-        boneName: n("rightFoot"),
-        quaternion: dirQuat(j.rightAnkle, j.rightFootIndex),
-      },
-    ],
-  };
-}

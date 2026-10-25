@@ -1,19 +1,28 @@
 import { describe, expect, it } from "vitest";
 import type { PoseEditDraft } from "@/utils/pose-edit";
 import {
+  composePoseTool,
   countEditedBones,
   countEditedFrames,
   createPoseStudioUiState,
   getEditModeForTool,
+  getPoseEditTarget,
+  getPoseGizmo,
   getPoseDraftSummary,
   getTransformModeForTool,
   isGlobalPoseStudioTool,
   isPoseStudioGizmoEnabled,
+  markLandmarkJumps,
+  poseGizmoApplies,
   poseStudioUiReducer,
   shiftQualityMarkersAfterDelete,
+  summarizePoseCaptureQuality,
   trimQualityMarkersAfter,
   trimQualityMarkersBefore,
+  type PoseEditTarget,
   type PoseFrameQualityMarker,
+  type PoseGizmo,
+  type PoseStudioTool,
 } from "@/components/pose-studio/workspace";
 
 const marker = (
@@ -24,6 +33,7 @@ const marker = (
   label,
   score: label === "Good" ? 0.95 : label === "Usable" ? 0.65 : 0.25,
   warnings: label === "Poor" ? ["Low quality"] : [],
+  heldBones: [],
 });
 
 const draft = (): PoseEditDraft => ({
@@ -144,5 +154,93 @@ describe("pose studio workspace helpers", () => {
       marker(0),
       marker(1, "Usable"),
     ]);
+  });
+
+  it("summarises held bones and landmark jumps across a capture", () => {
+    const markers = markLandmarkJumps(
+      [
+        marker(0),
+        { ...marker(1, "Usable"), heldBones: ["leftArm", "leftForeArm"] },
+        { ...marker(2), heldBones: ["leftArm"] },
+      ],
+      [2],
+    );
+
+    expect(summarizePoseCaptureQuality(markers)).toEqual({
+      frameCount: 3,
+      averageScore: 0.85,
+      label: "Good",
+      heldFrameCount: 2,
+      heldBoneCount: 3,
+      landmarkJumpCount: 1,
+    });
+
+    expect(shiftQualityMarkersAfterDelete(markers, 1)[1]).toMatchObject({
+      frameIndex: 1,
+      landmarkJump: true,
+      heldBones: ["leftArm"],
+    });
+    expect(trimQualityMarkersBefore(markers, 2)[0]).toMatchObject({
+      frameIndex: 0,
+      landmarkJump: false,
+      heldBones: ["leftArm"],
+    });
+  });
+});
+
+describe("pose tool composition", () => {
+  const tools: PoseStudioTool[] = [
+    "select",
+    "fk-rotate",
+    "fk-move",
+    "ik",
+    "global-rotate",
+    "global-move",
+  ];
+
+  it("splits every tool into a target and a gizmo", () => {
+    expect(tools.map(getPoseEditTarget)).toEqual([
+      "select",
+      "bone",
+      "bone",
+      "ik",
+      "pose",
+      "pose",
+    ]);
+    expect(tools.map(getPoseGizmo)).toEqual([
+      "rotate",
+      "rotate",
+      "move",
+      "rotate",
+      "rotate",
+      "move",
+    ]);
+  });
+
+  it("round-trips a tool through its target and gizmo", () => {
+    for (const tool of tools) {
+      expect(composePoseTool(getPoseEditTarget(tool), getPoseGizmo(tool))).toBe(
+        tool,
+      );
+    }
+  });
+
+  it("keeps the gizmo choice from changing targets that ignore it", () => {
+    // Select and IK have no rotate/move distinction, so the palette must not
+    // offer one — picking a gizmo while they are active is a no-op.
+    for (const target of ["select", "ik"] as PoseEditTarget[]) {
+      expect(poseGizmoApplies(target)).toBe(false);
+      for (const gizmo of ["rotate", "move"] as PoseGizmo[]) {
+        expect(composePoseTool(target, gizmo)).toBe(target);
+      }
+    }
+    expect(poseGizmoApplies("bone")).toBe(true);
+    expect(poseGizmoApplies("pose")).toBe(true);
+  });
+
+  it("remembers the gizmo when switching between bone and whole-pose edits", () => {
+    const gizmo = getPoseGizmo("fk-move");
+    expect(composePoseTool("pose", gizmo)).toBe("global-move");
+    expect(getEditModeForTool(composePoseTool("ik", gizmo))).toBe("ik");
   });
 });

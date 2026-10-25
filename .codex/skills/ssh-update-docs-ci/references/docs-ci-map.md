@@ -10,6 +10,15 @@
 - GitHub Action: `action/action.yml`, `action/README.md`.
 - Deployment config: `railway.toml`, `railpack.json`.
 - Package scripts: `package.json`.
+- Tauri desktop release packaging: `.github/workflows/release.yml`,
+  `scripts/tauri-release.mjs`, `scripts/check-appimage-layout.mjs`, and
+  `scripts/check-version-sync.mjs`.
+- Blender add-on release packaging: `.github/workflows/release.yml` and
+  `blender_addon/package_addon.py`.
+- AppStream catalog metadata and screenshot:
+  `src-tauri/com.kyonru.spritesheethelper.metainfo.xml` and
+  `screenshots/main.png`.
+- App-version synchronization: `scripts/sync-version.mjs`.
 
 ## Docs Rules
 
@@ -26,6 +35,25 @@
 - Avoid documenting flags before parser support exists.
 - If a command requires `npm run build:cli`, say so near the command.
 - Keep release/download docs aligned with actual package outputs.
+- Linux releases must validate the generated AppDir before upload. `.DirIcon`
+  and the root `.desktop` entry may be files or relative symlinks, but never
+  absolute build-machine symlinks. `AppRun` and linuxdeploy's optional
+  `AppRun.wrapped` launcher must be executable by every user so they continue
+  to work when a sandbox mounts the AppImage payload as root. The AppDir must
+  also contain the AppStream metainfo file, whose launchable matches that root
+  `.desktop` entry and whose default screenshot uses an HTTPS URL.
+- Tagged desktop workflows must provide `releaseName` to `tauri-action` so a
+  fresh tag creates its GitHub Release without requiring manual setup.
+- Tagged releases build and test both Blender add-on layouts after the desktop
+  jobs finish, then attach the Extension and legacy ZIPs to the same GitHub
+  Release. Keep generated archives out of source control.
+- `package.json` is the app-version source of truth. Keep its version aligned
+  with the root package-lock entries, Tauri config, Cargo manifest/lock, latest
+  AppStream release, changelog entry, and release tag; `npm run check:version`
+  enforces this.
+- Run `npm run sync:version` after changing `package.json` to update the
+  package-lock, Cargo manifest/lock, Tauri package reference, and AppStream
+  release. Changelog entries and release tags remain deliberate release steps.
 
 ## Test Targets
 

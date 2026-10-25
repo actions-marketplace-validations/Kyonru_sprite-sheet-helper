@@ -67,6 +67,29 @@ Release tags like `v0.4.0` publish Docker image tags `v0.4.0`, `v0.4`, `v0`, and
 
 The repository includes a standalone `example/` project template that discovers every model in a `models/` folder, runs the Docker Action on push to `main`, and uploads generated sprite artifacts.
 
+## Release Versions
+
+`package.json` is the app-version source of truth. After changing it, synchronize
+the generated package and desktop metadata, then verify the complete release
+state:
+
+```bash
+npm run sync:version
+npm run check:version
+```
+
+The sync command updates `package-lock.json`, the Tauri Cargo manifest and lock,
+Tauri's reference back to `package.json`, and the latest AppStream release.
+Add the matching `CHANGELOG.md` entry deliberately; release tags must use the
+exact `v<version>` form.
+
+Linux AppImages include AppStream catalog metadata from
+`src-tauri/com.kyonru.spritesheethelper.metainfo.xml`. Its default catalog
+screenshot is the repository image at `screenshots/main.png`. Keep the
+metadata's desktop launchable aligned with the generated root `.desktop` file;
+the Linux release job validates the XML before building and verifies its
+presence in the generated AppDir afterward.
+
 ## GitHub Pages Docs
 
 The documentation site is built with Zensical from the root `docs` directory. Pages in `docs` mirror the app documentation from `src/docs` with symlinks.
